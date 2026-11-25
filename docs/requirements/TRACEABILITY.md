@@ -3,9 +3,11 @@
 The reserved requirement and test IDs below come from [specification v1.4 §16](../../PROJECT_SPECIFICATION.md#16-testing-and-validation-plan--approved-phases-10-18).
 Add objective acceptance procedures and fixture versions before implementing each requirement. Link each executed test to the build and sanitized evidence. Track conditional applicability when decided.
 
+The [D02 evidence](../test-plans/D02-EVIDENCE.md) records scoped checks for the other foundation requirements. Their full reserved cases remain pending where they depend on later integrations.
+
 | Requirement or control | Goal | Baseline module | Reserved test ID | Category | Test status |
 |---|---|---|---|---|---|
-| FR01 | G03 | M02 | TC-FR01 | T03 | Not Run |
+| FR01 | G03 | M02 | TC-FR01 | T03 | [Pass on D02](../test-plans/D02-EVIDENCE.md) |
 | FR02 | G01 | M04 | TC-FR02 | T08/T09 | Not Run |
 | FR03 | G02 | M04 | TC-FR03 | T08/T09 | Not Run |
 | FR04 | G03 | M04 | TC-FR04 | T03 | Not Run |

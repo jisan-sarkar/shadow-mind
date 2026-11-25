@@ -2,24 +2,16 @@
 
 Updated 2026-11-25. Baseline [PROJECT_SPECIFICATION.md](PROJECT_SPECIFICATION.md) v1.4.
 
-## D00 — Project preparation complete
-
-| Task | Evidence and status |
+| Milestone | Status |
 |---|---|
-| PREP-01 · [#2](https://github.com/jisan-sarkar/shadow-mind/issues/2) | Reference host inventory independently verified on the Ubuntu desktop. |
-| PREP-02 · [#3](https://github.com/jisan-sarkar/shadow-mind/issues/3) | Verified. Owner installed the five native packages. Rust, Cargo, Node, pnpm, package metadata and native compiler/linker smoke checks passed. |
-| PREP-03 · [#4](https://github.com/jisan-sarkar/shadow-mind/issues/4) | Private origin, clean initial `dev` checkout, identity, foundation files and settings verified. Local evidence and all 138 requirement mappings verified. |
-| PREP-04 · [#5](https://github.com/jisan-sarkar/shadow-mind/issues/5) | Prepared. Mock-only policy, USD 0 paid budget, FZ01–FZ12 procedures, risk ownership and evidence locations recorded. |
-| PREP-05 · [#6](https://github.com/jisan-sarkar/shadow-mind/issues/6) | Approved by the owner in chat following review of the verified prerequisite evidence. |
+| D00 · Preparation | Owner approved [PREP-05](https://github.com/jisan-sarkar/shadow-mind/issues/6). Reference Ubuntu host, local clone and toolchains verified. |
+| D01 · Feasibility | Owner approved [FEAS-04](https://github.com/jisan-sarkar/shadow-mind/issues/10) and the tested pins for D02. [Feasibility evidence](docs/test-plans/D01-EVIDENCE.md) records native consent, synthetic fixtures and the first resource baseline. |
+| D02 · Application foundation | Implemented and verified locally on the reference desktop. See the [foundation contract](docs/architecture/D02-FOUNDATION.md) and [verification evidence](docs/test-plans/D02-EVIDENCE.md). Hosted CI remains pending the reviewed remote integration. |
+| D03 · Authorized native inputs | Next after foundation review. |
+| D04–D09 | Pending their milestone prerequisites. |
 
-D01 feasibility evidence is ready for FEAS-04 owner review. D02–D09 remain pending. The application has no implementation, runtime evidence or release. Requirement tests and VG01–VG10 remain Not Run.
+## Next action
 
-## Evidence and next action
+Review and integrate the D02 branch through the approved GitHub workflow. Start D03 with WP01/WP02/WP06, their typed source and grant contracts, and their authorized native acceptance cases. The D02 app uses bundled synthetic inputs and stores preferences locally. Paid usage and external processing remain disabled.
 
-- [Host, prerequisite and repository evidence](docs/development/STATUS.md)
-- [Open decisions and resolution gates](docs/development/DECISIONS.md)
-- [Requirement traceability](docs/requirements/TRACEABILITY.md)
-- [D01 feasibility procedures](docs/test-plans/D01.md)
-- [D01 feasibility evidence](docs/test-plans/D01-EVIDENCE.md)
-
-Review and approve the D01 exit at FEAS-04. The remaining decision is whether to use the tested Tauri stack for D02 with the GNOME/GLib advisory tracked for affected-path reassessment and release disposition. Once approved, start BUILD-PLAN and D02.
+The [decision register](docs/development/DECISIONS.md) tracks the GLib advisory and remaining approvals. The [traceability register](docs/requirements/TRACEABILITY.md) distinguishes the verified D02 behavior from later integration and release conditions.

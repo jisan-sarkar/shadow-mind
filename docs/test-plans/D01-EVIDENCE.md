@@ -61,4 +61,4 @@ Two allow attempts returned an authorized stream and closed it safely after a fa
 
 The isolated build and the authorized procedures provide D01 feasibility evidence. Approve the tested Tauri v2 pins for the local D02 foundation. Keep the GLib advisory and the two maintenance warnings visible in dependency scans. Before release, re-evaluate the linked Linux dependency graph and affected paths on the actual product build, check for an upstream fix, and document remediation or an approved disposition under the specification's security and release gates. This proposal does not approve production release or suppress the advisory.
 
-D01 exit is pending explicit owner approval. BUILD-PLAN and D02 follow that decision.
+The owner approved D01 exit and the tested pins for D02 in chat. The GLib advisory remains tracked for the D02 build and release review.

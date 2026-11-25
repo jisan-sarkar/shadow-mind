@@ -1,14 +1,14 @@
-# D00 evidence and handover
+# Development handover and D00 evidence
 
 | Field | Record |
 |---|---|
 | Date and environment | 2026-11-25 (Asia/Dhaka), reference Ubuntu desktop, active GNOME/Wayland session |
-| Specification and task | v1.4. D00 exit approved at PREP-05 [#6](https://github.com/jisan-sarkar/shadow-mind/issues/6). D01 / FEAS-04 [#10](https://github.com/jisan-sarkar/shadow-mind/issues/10) owner review. The [D01 report](../test-plans/D01-EVIDENCE.md) records FZ01–FZ12. |
-| Workspace | `/home/js/Projects/shadow-mind`, local branch `docs/d00-reference-host` |
+| Specification and task | v1.4. D00 and D01 exits approved. BUILD-PLAN and D02 local foundation verified. The [D02 report](../test-plans/D02-EVIDENCE.md) records verification. |
+| Workspace | `/home/js/Projects/shadow-mind`, local branch `feature/d02-foundation` from `dev` |
 | Baseline | `origin/dev` at `c33a54af33b297b07bf15dab32611675e814e72a` and `origin/main` at `fd98f54c60af97a182e4792e4ba2f36b555e5643` |
 | Relevant requirements | NFR09/NFR11 and SEC07/SEC08 prerequisite evidence. No requirement test executed. |
-| Blocker and next task | D00 exit approved in chat. Native screen and combined-mode probes are verified for the permitted fixtures. Obtain FEAS-04 exit approval and owner disposition of the GLib warning before BUILD-PLAN. |
-| Changes in this handover | Root status, D00 evidence, open decisions, traceability register and D01 test procedures. |
+| Blocker and next task | Review the D02 branch and integrate through an authorized GitHub PR. D03 is the next implementation milestone. Keep the GLib advisory visible for release review. |
+| Changes in this handover | Locked Tauri foundation, settings, synthetic lifecycle, frontend and native checks, CI workflow, traceability and evidence. |
 
 ## PREP-01 reference host
 
