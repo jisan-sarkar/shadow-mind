@@ -5,12 +5,16 @@ import {
   getSnapshot,
   savePreferences,
   subscribeSnapshots,
+  startNativeInput,
+  stopNativeInputs,
   type Appearance,
   type SessionAction,
   type Snapshot,
   type TextScale,
   type Theme,
 } from "./bridge";
+import ImageInspection from "./ImageInspection";
+import NativeSources, { inputRunning } from "./NativeSources";
 import Workspace, { phaseLabels } from "./Workspace";
 import "./app.css";
 
@@ -86,7 +90,7 @@ function Settings({
         <dl className="session-details">
           <div>
             <dt>Screen and microphone access</dt>
-            <dd>Off</dd>
+            <dd>Session approval required</dd>
           </div>
           <div>
             <dt>Remote processing</dt>
@@ -191,6 +195,8 @@ export default function App() {
   const onboarded = current.preferences.onboardingComplete;
   const heading = view === "workspace" ? "Session workspace" : "Settings";
   const showRecovery = current.recoveryNotice !== null;
+  const liveInput =
+    inputRunning(session.screenStatus) || inputRunning(session.audioStatus);
 
   return (
     <div className="shell">
@@ -228,7 +234,7 @@ export default function App() {
           <span className="status-dot" aria-hidden="true" />
           <div>
             <strong>Local demo</strong>
-            <small>Synthetic inputs only</small>
+            <small>Local processing</small>
           </div>
         </div>
       </aside>
@@ -242,14 +248,27 @@ export default function App() {
                 : "Manage appearance and view processing permissions."}
             </p>
           </div>
-          <span
-            className="badge session-badge"
-            data-active={session.phase === "active"}
-            role="status"
-          >
-            <span className="status-dot" aria-hidden="true" />
-            {phaseLabels[session.phase]}
-          </span>
+          <div className="header-controls">
+            <span
+              className="badge session-badge"
+              data-active={session.phase === "active"}
+              role="status"
+            >
+              <span className="status-dot" aria-hidden="true" />
+              {liveInput ? "Live input session" : phaseLabels[session.phase]}
+            </span>
+            {liveInput && session.id && (
+              <button
+                className="quiet"
+                onClick={() => {
+                  const id = session.id;
+                  if (id) void run(() => stopNativeInputs(id));
+                }}
+              >
+                Stop live inputs
+              </button>
+            )}
+          </div>
         </header>
         {showRecovery && (
           <p className="notice" role="status">
@@ -294,11 +313,37 @@ export default function App() {
             </button>
           </section>
         ) : (
-          <Workspace
-            session={session}
-            busy={busy}
-            send={(action: SessionAction) => run(() => dispatchSession(action))}
-          />
+          <>
+            <Workspace
+              session={session}
+              busy={busy}
+              send={(action: SessionAction) =>
+                run(() => dispatchSession(action))
+              }
+            />
+            {session.phase === "active" && session.id && (
+              <NativeSources
+                key={`input-${session.id}`}
+                session={session}
+                busy={busy}
+                start={(kind, confirmed, sourceId) => {
+                  const id = session.id;
+                  return id
+                    ? run(() => startNativeInput(id, kind, confirmed, sourceId))
+                    : Promise.resolve();
+                }}
+              />
+            )}
+
+            {session.phase === "active" &&
+              session.id &&
+              (session.mode === "screen" || session.mode === "both") && (
+                <ImageInspection
+                  key={`image-${session.id}`}
+                  sessionId={session.id}
+                />
+              )}
+          </>
         )}
       </main>
     </div>

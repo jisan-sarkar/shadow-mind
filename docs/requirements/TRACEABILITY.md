@@ -4,6 +4,7 @@ The reserved requirement and test IDs below come from [specification v1.4 §16](
 Add objective acceptance procedures and fixture versions before implementing each requirement. Link each executed test to the build and sanitized evidence. Track conditional applicability when decided.
 
 The [D02 evidence](../test-plans/D02-EVIDENCE.md) records scoped checks for the other foundation requirements. Their full reserved cases remain pending where they depend on later integrations.
+The D03 smoke checks cover authorized input setup and cleanup. Complete the remaining native cases and later interpretation checks before marking the corresponding full cases Passed. [D03 evidence](../test-plans/D03-EVIDENCE.md)
 
 | Requirement or control | Goal | Baseline module | Reserved test ID | Category | Test status |
 |---|---|---|---|---|---|

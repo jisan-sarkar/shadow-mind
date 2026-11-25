@@ -50,6 +50,10 @@ apt-get -s install build-essential pkg-config libwebkit2gtk-4.1-dev libssl-dev l
 
 After explicit host-change approval, use the supported distro package manager and reviewed official Rust/Node/pnpm installation methods. Prefer stable Rust, compatible Node LTS (Node 24 candidate) and a pinned pnpm release. Record exact versions after D01. Do not use unreviewed install scripts, blanket upgrades or elevated privileges for normal application operation.
 
+### Native input build dependencies (D03)
+
+The D03 Rust adapters link GStreamer and use the PipeWire source plug-in. The Debian package declares the runtime dependencies. For a development build, verify `pkg-config --modversion gstreamer-1.0 gstreamer-app-1.0`. The package names on the reference Ubuntu system are `libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev` and `gstreamer1.0-pipewire`. A local build can also use a compatible unprivileged SDK supplied through `PKG_CONFIG_PATH` and verified against the installed runtimes. Host package changes require the applicable owner approval.
+
 ## 4. Feasibility then scaffolding
 
 Complete D00 exit review first. During D01, use an isolated disposable scaffold generated with the official Tauri v2 React/TypeScript template; do not overwrite this repository. Validate ordinary desktop build, standard permission behavior and mock-only processing with synthetic fixtures. Once D01 passes, integrate the verified scaffold on a feature branch in D02, preserving root documents. Use the official generator or supported existing-project initialization rather than a hand-assembled Tauri setup.

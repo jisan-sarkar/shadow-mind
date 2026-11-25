@@ -487,3 +487,44 @@ nav button[aria-current="page"] {
     flex-wrap: wrap;
   }
 }
+
+.image-panel {
+  margin-top: 1.1rem;
+}
+.image-panel > p {
+  margin-top: 0.65rem;
+}
+.image-result {
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.native-grid {
+  margin-top: 1.1rem;
+}
+.header-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.audio-choices {
+  max-height: 10rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.65rem 0.4rem;
+}
+.audio-choices legend {
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding-inline: 0.25rem;
+}
+.settings-form .audio-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding-block: 0.24rem;
+  overflow-wrap: anywhere;
+}

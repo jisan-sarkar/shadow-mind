@@ -1,0 +1,439 @@
+"""Exercise the packaged desktop app with synthetic inputs and normal GNOME consent."""
+
+from contextlib import contextmanager
+import json
+import os
+from pathlib import Path
+import runpy
+import subprocess
+import sys
+import tempfile
+import time
+
+import gi
+
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf
+
+SMOKE = runpy.run_path(str(Path(__file__).with_name("native-smoke.py")))
+Atspi = SMOKE["Atspi"]
+TONE = "ShadowMind_D03_Synthetic_Audio"
+WINDOW = "ShadowMind D03 Synthetic Window"
+IMAGE_CONSENT = "I have permission to inspect the image I select."
+IMAGE_PENDING = "Waiting for the file chooser…"
+LIVE_STATUSES = (
+    "Off", "Connecting", "Releasing source", "Receiving locally", "Unavailable",
+    "Permission ended", "Suspended", "Release failed. Reopen ShadowMind.",
+    "Desktop stop controls unavailable",
+)
+WINDOW_FIXTURE = """
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk
+window = Gtk.Window(title="ShadowMind D03 Synthetic Window")
+window.set_default_size(480, 320)
+area = Gtk.DrawingArea()
+colors = iter(([0.45, 0.2, 0.8], [0.7, 0.3, 0.3]) * 10000)
+color = next(colors)
+def tick():
+    global color
+    color = next(colors)
+    area.queue_draw()
+    return True
+def draw(_widget, context):
+    context.set_source_rgb(*color)
+    context.paint()
+    return False
+area.connect("draw", draw)
+window.add(area)
+window.show_all()
+GLib.timeout_add(200, tick)
+Gtk.main()
+"""
+
+
+def wait_for(predicate, description, seconds=8):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if value := predicate():
+            return value
+        time.sleep(0.1)
+    raise AssertionError(f"Timed out waiting for {description}")
+
+
+@contextmanager
+def child(arguments, env, log):
+    with log.open("wb") as output:
+        process = subprocess.Popen(arguments, env=env, stdout=output, stderr=subprocess.STDOUT)
+        try:
+            yield process
+        except Exception:
+            print(log.name, log.read_text(errors="replace")[-1500:], flush=True)
+            raise
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+
+
+@contextmanager
+def virtual_audio(root):
+    runtime = root / "pipewire"
+    runtime.mkdir(mode=0o700)
+    env = {
+        **os.environ,
+        "PIPEWIRE_RUNTIME_DIR": str(runtime),
+        "XDG_RUNTIME_DIR": str(runtime),
+        "XDG_STATE_HOME": str(root / "state"),
+        "XDG_CONFIG_HOME": str(root / "pipewire-config"),
+    }
+
+    def graph():
+        return json.loads(subprocess.check_output(["pw-dump"], env=env, timeout=4))
+
+    with child(["pipewire"], env, root / "pipewire.log"):
+        wait_for(lambda: (runtime / "pipewire-0").is_socket(), "private PipeWire daemon")
+        with child(["dbus-run-session", "--", "wireplumber", "--profile=policy"],
+                   env, root / "policy.log"):
+            command = [
+                "gst-launch-1.0", "-q", "audiotestsrc", "is-live=true", "freq=440",
+                "!", "audio/x-raw,format=S16LE,rate=48000,channels=1",
+                "!", "pipewiresink", "mode=provide",
+                f"stream-properties=props,node.name=shadowmind.d03.tone,node.description={TONE},media.class=Audio/Source",
+            ]
+            with child(command, env, root / "tone.log") as tone:
+                wait_for(lambda: any(TONE in str(node) for node in graph()), "synthetic tone")
+                previous = os.environ.get("PIPEWIRE_RUNTIME_DIR")
+                os.environ["PIPEWIRE_RUNTIME_DIR"] = str(runtime)
+                try:
+                    yield tone, lambda: any(
+                        node.get("type") == "PipeWire:Interface:Link"
+                        and node.get("info", {}).get("state") == "active"
+                        for node in graph()
+                    )
+                finally:
+                    if previous is None:
+                        os.environ.pop("PIPEWIRE_RUNTIME_DIR", None)
+                    else:
+                        os.environ["PIPEWIRE_RUNTIME_DIR"] = previous
+
+
+class Workspace:
+    def __init__(self, app, mode):
+        self.app = app
+        self.click("Continue to workspace")
+        if mode is not None:
+            self.click(mode, "radio button")
+        self.click("Configure session")
+        self.click("Use bundled synthetic inputs for this session.", "check box")
+        self.click("Start demo")
+
+    def find(self, name, role=None):
+        return SMOKE["named"](self.app, name, role)
+
+    def expect(self, name, seconds=8):
+        return wait_for(lambda: self.find(name), name, seconds)
+
+    def expect_status(self, source, name, seconds=8):
+        def status():
+            section = self.find(f"{source} input", "landmark")
+            return section and SMOKE["named"](section, name)
+
+        try:
+            return wait_for(status, f"{source} status {name}", seconds)
+        except AssertionError as failure:
+            section = self.find(f"{source} input", "landmark")
+            if section:
+                for actual in LIVE_STATUSES:
+                    if SMOKE["named"](section, actual):
+                        raise AssertionError(f"{source} status was {actual!r}, expected {name!r}") from failure
+            raise
+
+    def click(self, name, role="button"):
+        def ready():
+            item = self.find(name, role)
+            return item if item and item.get_state_set().contains(Atspi.StateType.SENSITIVE) else None
+
+        SMOKE["click"](wait_for(ready, name))
+
+    def start_window(self):
+        self.click("I have permission to share the window or display I select.", "check box")
+        self.click("Choose window or display")
+        self.expect_status("Screen", "Connecting")
+
+    def start_audio(self):
+        self.click("Find audio sources")
+        self.click(TONE, "radio button")
+        self.click("I have permission to use this audio source, including participant consent where required.",
+                   "check box")
+        self.click("Start audio input")
+
+    def open_image_picker(self):
+        self.click(IMAGE_CONSENT, "check box")
+        self.click("Choose image")
+        self.expect(IMAGE_PENDING)
+
+    def image_consent_reset(self):
+        checkbox = self.find(IMAGE_CONSENT, "check box")
+        button = self.find("Choose image", "button")
+        return (
+            checkbox and button
+            and checkbox.get_state_set().contains(Atspi.StateType.SENSITIVE)
+            and not checkbox.get_state_set().contains(Atspi.StateType.CHECKED)
+            and not button.get_state_set().contains(Atspi.StateType.SENSITIVE)
+            and not self.find(IMAGE_PENDING)
+        )
+
+    def close(self, process):
+        self.click("Close")
+        assert process.wait(timeout=10) == 0
+
+
+def screen_video_nodes():
+    graph = json.loads(subprocess.check_output(["pw-dump"], timeout=4))
+    return {
+        props["object.serial"]
+        for node in graph
+        if node.get("type") == "PipeWire:Interface:Node"
+        for props in [node.get("info", {}).get("props", {})]
+        if props.get("media.class") in {"Stream/Output/Video", "Video/Source"}
+        and "object.serial" in props
+    }
+
+
+def screen_case(root, case):
+    existing_video_nodes = screen_video_nodes() if case == "close" else set()
+    with child([sys.executable, "-c", WINDOW_FIXTURE], os.environ.copy(), root / "window.log") as fixture:
+        with SMOKE["launch"](root, root / "app.log") as (process, app):
+            workspace = Workspace(app, None)
+            workspace.start_window()
+            if case == "denial":
+                print("Cancel the GNOME share dialog.", flush=True)
+                workspace.expect_status("Screen", "Permission ended", 75)
+                assert not workspace.find("Stop live inputs", "button")
+                workspace.start_window()
+            elif case != "cancel":
+                print(f"Select only {WINDOW} in the GNOME share dialog.", flush=True)
+                workspace.expect_status("Screen", "Receiving locally", 75)
+            if case == "close":
+                capture_nodes = wait_for(
+                    lambda: screen_video_nodes() - existing_video_nodes,
+                    "synthetic screen capture node",
+                )
+                workspace.close(process)
+                assert fixture.poll() is None, "synthetic window exited before cleanup could be checked"
+                wait_for(
+                    lambda: not capture_nodes.intersection(screen_video_nodes()),
+                    "release of screen capture node",
+                )
+            else:
+                workspace.click("Stop live inputs")
+                workspace.expect_status("Screen", "Off")
+                workspace.close(process)
+            print(f"PASS screen {case}", flush=True)
+
+
+def audio_case(root, case):
+    combined = case != "audio"
+    with virtual_audio(root) as (tone, has_active_link):
+        with SMOKE["launch"](root, root / "app.log") as (process, app):
+            mode = "Both Visual and spoken context" if combined else "Audio Spoken context"
+            workspace = Workspace(app, mode)
+            workspace.start_audio()
+            workspace.expect_status("Audio", "Receiving locally")
+            wait_for(has_active_link, "synthetic PipeWire link")
+            if combined:
+                workspace.start_window()
+                print(f"Select only {WINDOW} in the GNOME share dialog.", flush=True)
+                workspace.expect_status("Screen", "Receiving locally", 75)
+                if case == "revoke-first":
+                    print("Stop sharing using the GNOME sharing indicator.", flush=True)
+                    workspace.expect_status("Screen", "Permission ended", 75)
+                    workspace.expect_status("Audio", "Receiving locally")
+                    assert has_active_link()
+            tone.terminate()
+            tone.wait(timeout=5)
+            workspace.expect_status("Audio", "Unavailable")
+            wait_for(lambda: not has_active_link(), "release of synthetic PipeWire link")
+            if case in {"both", "both-isolation"}:
+                workspace.expect_status("Screen", "Receiving locally")
+                print("PASS the screen stayed active after audio disconnected.", flush=True)
+            if case == "both-isolation":
+                workspace.click("Stop live inputs")
+                workspace.expect_status("Screen", "Off")
+                workspace.expect_status("Audio", "Off")
+            if case == "both":
+                print("Stop sharing using the GNOME sharing indicator.", flush=True)
+                workspace.expect_status("Screen", "Permission ended", 75)
+            workspace.close(process)
+            print("PASS isolated audio disconnection and resource release", flush=True)
+            if case in {"both", "revoke-first"}:
+                print("PASS independent combined inputs and GNOME revocation", flush=True)
+
+
+def audio_lifecycle_case(root, action):
+    with virtual_audio(root) as (_, has_active_link):
+        with SMOKE["launch"](root, root / "app.log") as (process, app):
+            workspace = Workspace(app, "Audio Spoken context")
+            workspace.start_audio()
+            workspace.expect_status("Audio", "Receiving locally")
+            wait_for(has_active_link, "synthetic PipeWire link")
+            if action == "close-audio":
+                workspace.close(process)
+            elif action == "sleep":
+                print(f"Use GNOME to {action} the desktop, then return to it.", flush=True)
+            else:
+                workspace.click("Pause" if action == "pause" else "Minimize")
+                if action == "minimize":
+                    assert has_active_link(), "audio stopped before the desktop control could be tested"
+                    print("Open GNOME notifications and choose Stop input on ShadowMind audio input.", flush=True)
+            def capture_released():
+                if action == "minimize" and process.poll() is not None:
+                    raise AssertionError(
+                        f"ShadowMind exited with status {process.returncode} before the desktop stop was verified"
+                    )
+                return not has_active_link()
+
+            wait_for(
+                capture_released,
+                f"PipeWire link release on {action}",
+                120 if action == "minimize" else 60,
+            )
+            if action != "close-audio":
+                if action == "minimize":
+                    print("Restore the ShadowMind window to check that audio is Off.", flush=True)
+
+                    def restored_workspace():
+                        if process.poll() is not None:
+                            raise AssertionError("ShadowMind exited before its window was restored")
+                        current = SMOKE["root_for"](process.pid)
+                        frame = SMOKE["named"](current, "ShadowMind", "frame")
+                        if frame and frame.get_state_set().contains(Atspi.StateType.ACTIVE):
+                            return current
+                        return None
+
+                    workspace.app = wait_for(
+                        restored_workspace,
+                        "restored and focused ShadowMind window",
+                        60,
+                    )
+                if action != "minimize" or workspace.find("Paused"):
+                    workspace.expect("Paused", 60)
+                    workspace.click("Resume")
+                workspace.expect_status("Audio", "Off", 60 if action == "minimize" else 8)
+                assert not has_active_link()
+                workspace.close(process)
+            print(f"PASS {action} releases audio and requires fresh authorization", flush=True)
+
+
+def lock_case(root):
+    session = subprocess.check_output(
+        ["loginctl", "show-user", str(os.getuid()), "-p", "Display", "--value"],
+        text=True,
+        timeout=4,
+    ).strip()
+    assert session, "reference desktop session unavailable"
+
+    def locked():
+        return subprocess.check_output(
+            ["loginctl", "show-session", session, "-p", "LockedHint", "--value"],
+            text=True,
+            timeout=4,
+        ).strip() == "yes"
+
+    assert not locked(), "start the lock test on the unlocked desktop"
+    with virtual_audio(root) as (_, has_active_link):
+        with SMOKE["launch"](root, root / "app.log") as (process, app):
+            workspace = Workspace(app, "Both Visual and spoken context")
+            workspace.start_audio()
+            workspace.expect_status("Audio", "Receiving locally")
+            wait_for(has_active_link, "synthetic PipeWire link")
+
+            def application_bus_names():
+                names = subprocess.check_output(
+                    ["busctl", "--user", "--no-legend", "--no-pager", "list"],
+                    text=True,
+                    timeout=4,
+                )
+                return {
+                    fields[0] for fields in (line.split() for line in names.splitlines())
+                    if len(fields) > 1 and fields[0].startswith(":") and fields[1] == str(process.pid)
+                }
+
+            earlier_names = application_bus_names()
+            workspace.open_image_picker()
+            picker_names = wait_for(
+                lambda: application_bus_names() - earlier_names,
+                "dedicated image picker bus connection",
+            )
+            print("Lock GNOME without closing the image chooser.", flush=True)
+            wait_for(locked, "GNOME desktop lock", 120)
+            wait_for(
+                lambda: locked() and not has_active_link()
+                and picker_names.isdisjoint(application_bus_names()),
+                "audio and picker release while locked",
+            )
+            assert process.poll() is None, "ShadowMind exited during desktop lock"
+            print("PASS audio and the picker were released while GNOME was locked. Unlock the desktop.", flush=True)
+            wait_for(lambda: not locked(), "GNOME desktop unlock", 120)
+            workspace.app = wait_for(lambda: SMOKE["root_for"](process.pid), "workspace after unlock")
+            workspace.expect("Paused")
+            assert not workspace.find(IMAGE_PENDING)
+            assert not has_active_link()
+            workspace.click("Resume")
+            workspace.expect_status("Audio", "Off")
+            wait_for(workspace.image_consent_reset, "cleared image request and fresh consent")
+            start = workspace.find("Start audio input", "button")
+            assert start and not start.get_state_set().contains(Atspi.StateType.SENSITIVE)
+            assert not has_active_link()
+            workspace.close(process)
+            print("PASS unlock preserved pause and required fresh consent", flush=True)
+
+
+def image_case(root, formats, cancel_first=False):
+    fixture = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 32, 24)
+    fixture.fill(0x6837c7ff)
+    with SMOKE["launch"](root, root / "app.log") as (process, app):
+        workspace = Workspace(app, None)
+        if cancel_first:
+            workspace.open_image_picker()
+            print("Cancel the GNOME image chooser.", flush=True)
+            wait_for(workspace.image_consent_reset, "cleared image request and consent", 75)
+            print("PASS cancellation cleared the image request and reset consent", flush=True)
+        for codec in formats:
+            suffix = "jpg" if codec == "jpeg" else codec
+            path = root / f"synthetic-image.{suffix}"
+            fixture.savev(str(path), codec, [], [])
+            workspace.open_image_picker()
+            print(f"Choose this file in the GNOME file chooser: {path}", flush=True)
+            workspace.expect(f"Valid {codec.upper()} · 32 × 24 pixels", 75)
+            print(f"PASS {codec.upper()} selected in the native file chooser", flush=True)
+        workspace.close(process)
+
+
+def main():
+    Atspi.init()
+    case = os.environ.get("SHADOWMIND_INPUT_TEST", "cancel")
+    with tempfile.TemporaryDirectory(prefix="shadowmind-native-input-") as directory:
+        root = Path(directory)
+        if case in {"cancel", "denial", "screen", "close"}:
+            screen_case(root, case)
+        elif case == "audio":
+            audio_case(root, case)
+        elif case in {"both", "both-isolation", "revoke-first"}:
+            with child([sys.executable, "-c", WINDOW_FIXTURE], os.environ.copy(), root / "window.log"):
+                audio_case(root, case)
+        elif case in {"image", "image-png", "image-jpeg"}:
+            image_case(root, ("png", "jpeg") if case == "image" else (case.removeprefix("image-"),))
+        elif case == "image-jpeg-cancel":
+            image_case(root, ("jpeg",), cancel_first=True)
+        elif case == "lock":
+            lock_case(root)
+        elif case in {"pause", "close-audio", "minimize", "sleep"}:
+            audio_lifecycle_case(root, case)
+        else:
+            raise SystemExit(f"Unknown SHADOWMIND_INPUT_TEST: {case}")
+
+
+if __name__ == "__main__":
+    main()

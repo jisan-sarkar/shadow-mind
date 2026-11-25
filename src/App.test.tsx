@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import App from "./App";
 import {
+  chooseImage,
   dispatchSession,
   getSnapshot,
   savePreferences,
@@ -19,6 +20,7 @@ import {
 vi.mock("./bridge", async (load) => ({
   ...(await load<typeof import("./bridge")>()),
   getSnapshot: vi.fn(),
+  chooseImage: vi.fn(),
   savePreferences: vi.fn(),
   dispatchSession: vi.fn(),
   subscribeSnapshots: vi.fn(),
@@ -38,6 +40,8 @@ const idle: Snapshot = {
     mode: null,
     phase: "idle",
     fixtureStatus: "ready",
+    screenStatus: "idle",
+    audioStatus: "idle",
     fixture: null,
   },
 };
@@ -194,4 +198,36 @@ test("settings errors surface and a later save updates appearance", async () => 
     expect(document.documentElement.dataset.theme).toBe("light"),
   );
   expect(document.documentElement.dataset.scale).toBe("125");
+});
+
+test("image inspection requires separate authorization for each selection", async () => {
+  vi.mocked(getSnapshot).mockResolvedValue({
+    ...idle,
+    revision: 1,
+    session: {
+      ...idle.session,
+      id: "allowed-image-session",
+      mode: "screen",
+      phase: "active",
+    },
+  });
+  vi.mocked(chooseImage).mockResolvedValue({
+    format: "PNG",
+    width: 32,
+    height: 24,
+  });
+  render(<App />);
+  const choose = (await screen.findByRole("button", {
+    name: "Choose image",
+  })) as HTMLButtonElement;
+  expect(choose.disabled).toBe(true);
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: /I have permission to inspect the image/,
+    }),
+  );
+  fireEvent.click(choose);
+  expect(chooseImage).toHaveBeenCalledWith("allowed-image-session", true);
+  expect(await screen.findByText("Valid PNG · 32 × 24 pixels")).toBeTruthy();
+  expect(choose.disabled).toBe(true);
 });

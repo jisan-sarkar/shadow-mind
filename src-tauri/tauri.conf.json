@@ -22,6 +22,11 @@
   "bundle": {
     "active": true,
     "targets": ["deb"],
+    "linux": {
+      "deb": {
+        "depends": ["gstreamer1.0-pipewire", "gstreamer1.0-plugins-base"]
+      }
+    },
     "category": "Productivity",
     "shortDescription": "Authorized contextual assistance workspace",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"]
