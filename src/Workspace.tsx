@@ -40,6 +40,9 @@ export default function Workspace({ session, busy, send }: Props) {
   const [confirmedSession, confirm] = useState<string | null>(null);
   const canConfigure = session.phase === "idle" || session.phase === "stopped";
   const { id, phase } = session;
+  const releasing =
+    session.screenStatus === "disconnecting" ||
+    session.audioStatus === "disconnecting";
   const selected = modes.find(
     (choice) => choice.value === (canConfigure ? mode : session.mode),
   );
@@ -97,7 +100,7 @@ export default function Workspace({ session, busy, send }: Props) {
           {canConfigure && (
             <button
               className="primary"
-              disabled={busy}
+              disabled={busy || releasing}
               onClick={() => void send({ type: "configure", mode })}
             >
               Configure session

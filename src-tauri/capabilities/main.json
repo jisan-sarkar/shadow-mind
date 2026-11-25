@@ -7,6 +7,10 @@
     "allow-snapshot",
     "allow-update-preferences",
     "allow-session-action",
+    "allow-choose-image",
+    "allow-list-audio-sources",
+    "allow-start-native-input",
+    "allow-stop-native-inputs",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

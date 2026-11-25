@@ -6,7 +6,7 @@ ShadowMind is a planned Ubuntu-first desktop AI copilot. It will interpret permi
 
 ## Status
 
-Specification baseline v1.4. The D02 foundation provides an Ubuntu desktop workspace, local appearance settings, and a synthetic demo session. Native inputs and provider integration follow later milestones. No public software release is available.
+Specification baseline v1.4. The Ubuntu desktop workspace supports local settings and a synthetic demo session. D03 adds explicitly authorized native inputs and local image inspection. Provider integration follows in D04. No public software release is available.
 
 ## Stack
 
@@ -14,7 +14,7 @@ Tauri v2, Rust/Tokio, React, TypeScript, Vite and pnpm. Modular monolith; local-
 
 ## Run the foundation
 
-Follow [PROJECT_SETUP.md](PROJECT_SETUP.md) for the Ubuntu prerequisites. Use Node and Rust from the checked-in toolchain files and pnpm from `package.json`.
+Follow [PROJECT_SETUP.md](PROJECT_SETUP.md) for the Ubuntu prerequisites, including the D03 GStreamer build libraries. Use Node and Rust from the checked-in toolchain files and pnpm from `package.json`.
 
 ```sh
 pnpm install --frozen-lockfile

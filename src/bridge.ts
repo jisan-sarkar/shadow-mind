@@ -19,6 +19,8 @@ export interface SessionSnapshot {
   mode: InputMode | null;
   phase: Phase;
   fixtureStatus: FixtureStatus;
+  screenStatus: NativeStatus;
+  audioStatus: NativeStatus;
   fixture: { question: string; answer: string } | null;
 }
 
@@ -89,3 +91,44 @@ export function errorMessage(error: unknown): string {
   }
   return "ShadowMind could not complete this action. Try again.";
 }
+
+export interface ImageMetadata {
+  format: "PNG" | "JPEG";
+  width: number;
+  height: number;
+}
+
+/** Inspect one authorized file selected through the native desktop chooser. */
+export const chooseImage = (sessionId: string, authorized: boolean) =>
+  invoke<ImageMetadata | null>("choose_image", { sessionId, authorized });
+
+export type NativeStatus =
+  | "idle"
+  | "connecting"
+  | "disconnecting"
+  | "receiving"
+  | "unavailable"
+  | "denied"
+  | "suspended";
+export type NativeKind = "screen" | "audio";
+export interface AudioChoice {
+  id: string;
+  label: string;
+}
+
+export const listAudioSources = (sessionId: string) =>
+  invoke<AudioChoice[]>("list_audio_sources", { sessionId });
+export const startNativeInput = (
+  sessionId: string,
+  kind: NativeKind,
+  confirmed: boolean,
+  sourceId?: string,
+) =>
+  invoke<Snapshot>("start_native_input", {
+    sessionId,
+    kind,
+    confirmed,
+    sourceId,
+  });
+export const stopNativeInputs = (sessionId: string) =>
+  invoke<Snapshot>("stop_native_inputs", { sessionId });
