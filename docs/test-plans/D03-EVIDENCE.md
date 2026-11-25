@@ -38,6 +38,8 @@ The `revoke-first` case passed on the same bundle under GNOME/Wayland. With both
 
 The `denial` case passed on the same bundle. Canceling the initial request from GNOME's sharing dialog set the screen status to Permission ended and removed the live-input stop control. After fresh consent, a second request reached Connecting. Stopping that request in ShadowMind returned the screen to Off and the runner exited successfully.
 
+The `close` case passed on the same bundle. The runner selected the synthetic window through the normal GNOME dialog with user consent, verified Receiving locally, and observed a new PipeWire video node. It closed ShadowMind through the window control and verified exit code 0 and removal of the video node while the synthetic window was still running. The GNOME top-bar indicator is a separate visual check.
+
 The reference portal advertised window and display selection, and the PipeWire inventory reported two Audio/Source nodes. Display capture and a source scoped to an ordinary application still need acceptance evidence.
 
 ## Repeatable desktop acceptance
@@ -59,7 +61,7 @@ The tests use GNOME/Wayland and Python GObject bindings for AT-SPI, GTK and GdkP
 |---|---|
 | `denial` | Cancel the GNOME share dialog. The app reports Permission ended and clears the pending request. The runner verifies a fresh request can start, then cancels it through ShadowMind. |
 | `screen` | Select only ShadowMind D03 Synthetic Window. The app receives samples and app-driven stop returns the source to Off. |
-| `close` | Select the synthetic window. The app closes during capture and exits successfully. Confirm GNOME's sharing indicator clears. |
+| `close` | Select the synthetic window. The runner closes the app during capture and verifies successful exit and removal of the PipeWire video node while the fixture stays open. Confirm GNOME's sharing indicator clears. |
 | `both-isolation` | Select the synthetic window. The runner disconnects the tone and verifies that audio is Unavailable, the audio link is gone, and screen stays active. It then stops both sources through ShadowMind. |
 | `both` | Select the synthetic window. The runner disconnects the tone and checks that screen stays active. Stop sharing via GNOME and check that the app reports Permission ended for the screen. |
 | `revoke-first` | Select the synthetic window, then stop sharing via GNOME when prompted. The runner verifies audio stays active before disconnecting it. |

@@ -171,8 +171,21 @@ class Workspace:
         assert process.wait(timeout=10) == 0
 
 
+def screen_video_nodes():
+    graph = json.loads(subprocess.check_output(["pw-dump"], timeout=4))
+    return {
+        props["object.serial"]
+        for node in graph
+        if node.get("type") == "PipeWire:Interface:Node"
+        for props in [node.get("info", {}).get("props", {})]
+        if props.get("media.class") in {"Stream/Output/Video", "Video/Source"}
+        and "object.serial" in props
+    }
+
+
 def screen_case(root, case):
-    with child([sys.executable, "-c", WINDOW_FIXTURE], os.environ.copy(), root / "window.log"):
+    existing_video_nodes = screen_video_nodes() if case == "close" else set()
+    with child([sys.executable, "-c", WINDOW_FIXTURE], os.environ.copy(), root / "window.log") as fixture:
         with SMOKE["launch"](root, root / "app.log") as (process, app):
             workspace = Workspace(app, None)
             workspace.start_window()
@@ -183,9 +196,18 @@ def screen_case(root, case):
                 workspace.start_window()
             elif case != "cancel":
                 print(f"Select only {WINDOW} in the GNOME share dialog.", flush=True)
-                workspace.expect("Receiving locally", 75)
+                workspace.expect_status("Screen", "Receiving locally", 75)
             if case == "close":
+                capture_nodes = wait_for(
+                    lambda: screen_video_nodes() - existing_video_nodes,
+                    "synthetic screen capture node",
+                )
                 workspace.close(process)
+                assert fixture.poll() is None, "synthetic window exited before cleanup could be checked"
+                wait_for(
+                    lambda: not capture_nodes.intersection(screen_video_nodes()),
+                    "release of screen capture node",
+                )
             else:
                 workspace.click("Stop live inputs")
                 workspace.expect_status("Screen", "Off")
