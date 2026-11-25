@@ -3,11 +3,11 @@
 | Field | Record |
 |---|---|
 | Date and environment | 2026-11-25 (Asia/Dhaka), reference Ubuntu desktop, active GNOME/Wayland session |
-| Specification and task | v1.4. D00 exit approved at PREP-05 [#6](https://github.com/jisan-sarkar/shadow-mind/issues/6). D01 is active. FEAS-01 evidence and partial FEAS-02/03 results are in the [D01 report](../test-plans/D01-EVIDENCE.md). |
+| Specification and task | v1.4. D00 exit approved at PREP-05 [#6](https://github.com/jisan-sarkar/shadow-mind/issues/6). D01 / FEAS-04 [#10](https://github.com/jisan-sarkar/shadow-mind/issues/10) owner review. The [D01 report](../test-plans/D01-EVIDENCE.md) records FZ01–FZ12. |
 | Workspace | `/home/js/Projects/shadow-mind`, local branch `docs/d00-reference-host` |
 | Baseline | `origin/dev` at `c33a54af33b297b07bf15dab32611675e814e72a` and `origin/main` at `fd98f54c60af97a182e4792e4ba2f36b555e5643` |
 | Relevant requirements | NFR09/NFR11 and SEC07/SEC08 prerequisite evidence. No requirement test executed. |
-| Blocker and next task | D00 exit approved in chat. D01 screen consent and combined-mode acceptance need the owner to interact with GNOME. The separate FEAS-04 dependency review must address the RustSec GLib warning. |
+| Blocker and next task | D00 exit approved in chat. Native screen and combined-mode probes are verified for the permitted fixtures. Obtain FEAS-04 exit approval and owner disposition of the GLib warning before BUILD-PLAN. |
 | Changes in this handover | Root status, D00 evidence, open decisions, traceability register and D01 test procedures. |
 
 ## PREP-01 reference host

@@ -12,7 +12,7 @@ Updated 2026-11-25. Baseline [PROJECT_SPECIFICATION.md](PROJECT_SPECIFICATION.md
 | PREP-04 · [#5](https://github.com/jisan-sarkar/shadow-mind/issues/5) | Prepared. Mock-only policy, USD 0 paid budget, FZ01–FZ12 procedures, risk ownership and evidence locations recorded. |
 | PREP-05 · [#6](https://github.com/jisan-sarkar/shadow-mind/issues/6) | Approved by the owner in chat following review of the verified prerequisite evidence. |
 
-D01 feasibility is in progress after the approved D00 exit. D02–D09 remain pending. The application has no implementation, runtime evidence or release. Requirement tests and VG01–VG10 remain Not Run.
+D01 feasibility evidence is ready for FEAS-04 owner review. D02–D09 remain pending. The application has no implementation, runtime evidence or release. Requirement tests and VG01–VG10 remain Not Run.
 
 ## Evidence and next action
 
@@ -22,4 +22,4 @@ D01 feasibility is in progress after the approved D00 exit. D02–D09 remain pen
 - [D01 feasibility procedures](docs/test-plans/D01.md)
 - [D01 feasibility evidence](docs/test-plans/D01-EVIDENCE.md)
 
-Complete GNOME screen consent and combined-mode checks with the owner present at the desktop. The necessary cases are dismiss, grant for the synthetic window, disconnect of synthetic audio while sharing, and revoke via the GNOME indicator. Record the results before FEAS-04 and D01 exit review.
+Review and approve the D01 exit at FEAS-04. The remaining decision is whether to use the tested Tauri stack for D02 with the GNOME/GLib advisory tracked for affected-path reassessment and release disposition. Once approved, start BUILD-PLAN and D02.
