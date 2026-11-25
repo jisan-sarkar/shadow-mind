@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ShadowMind",
+  "version": "0.1.0",
+  "identifier": "com.shadowmind.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      { "label": "main", "title": "ShadowMind", "width": 1100, "height": 760, "minWidth": 520, "minHeight": 540 }
+    ],
+    "security": {
+      "capabilities": ["main"],
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; form-action 'none'; base-uri 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost ws://127.0.0.1:1420; object-src 'none'; form-action 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb"],
+    "category": "Productivity",
+    "shortDescription": "Authorized contextual assistance workspace",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"]
+  }
+}
