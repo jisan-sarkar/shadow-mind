@@ -1774,7 +1774,7 @@ Software versions are independent of specification revisions. Use semantic versi
 
 Primary Ubuntu `.deb` package; AppImage deferred. Document install and uninstall, including retained user settings and deletion options. Manually approved updates initially; checksums and verified release artifacts; private distribution; retain prior stable releases for rollback. Validate packaging and upgrade/rollback compatibility before release.
 
-Track, reproduce and regression-test bugs; review security vulnerabilities; perform controlled dependency updates; re-evaluate AI provider/model changes; repeat benchmarks and compatibility checks after major updates; update docs with changes; record technical debt. Record ADRs and retain reproducible test and build evidence. No repository, CI pipeline or package has yet been created.
+Track, reproduce and regression-test bugs; review security vulnerabilities; perform controlled dependency updates; re-evaluate AI provider/model changes; repeat benchmarks and compatibility checks after major updates; update docs with changes; record technical debt. Record ADRs and retain reproducible test and build evidence. The private repository and dev branch exist; no CI pipeline or software package has yet been created.
 
 ### Phase 18 — Delivery quality and maintenance
 
@@ -2386,8 +2386,8 @@ The owner intends application implementation to be carried out by a coding agent
 |---|---|---|---|
 | Owner hardware and OS | None supplied | Owner/agent run read-only inventory on actual host | D00.1 |
 | Installed dependencies | None verified on owner host | Agent inspect and request approval for missing prerequisites | D00.2 / D01 |
-| Project slug, identifier, workspace | Proposed only | Owner confirm local directory and identity; remote creation separately approved | D00.3–4 |
-| GitHub repository | No repository verified or created here | Agent inspect and initialize only within authority | D00.4 |
+| Project slug, identifier, workspace | ShadowMind / shadow-mind / com.shadowmind.desktop selected; local path and public namespace not verified | Owner confirm local directory; validate namespace before public distribution | D00.3–4 |
+| GitHub repository | Private jisan-sarkar/shadow-mind and main/dev verified; local clone and repository settings pending | Agent verify local clone; owner confirm repository settings | D00.4 |
 | Real AI provider/model | Research shortlist only | Agent run mock and authorized fixture evaluations; owner approve provider/model | D04 |
 | Paid AI account/budget | No authorization; paid disabled | Owner approve cap and provider policy before chargeable requests | Before paid integration |
 | Actual native compatibility | No executed checks | Agent execute FZ and applicable VP procedures on authorized host | D01–D03 |
@@ -2396,8 +2396,8 @@ The owner intends application implementation to be carried out by a coding agent
 | Detailed tests/fixtures | Procedure catalog and rubric supplied; no corpus constructed | Agent instantiate per requirement; keep Not Run until executed | Before respective implementation |
 | Release | No software or package exists | Agent implement, verify and obtain release approval | D02–D09 |
 
-### 28.3 Starting instruction (v1.3)
+### 28.3 Starting instruction (current baseline)
 
 > Read the master specification, including Sections 22–28. Inspect the actual authorized workspace, existing Git status and any development records. Treat §25 as the pre-code decision pack, §26 as logical contract guidance, §27 as planned validation procedures and §28 as the initial queue. Begin with PREP-01 / D00.1 if there is no verified setup. Use the safe mock-only, zero-paid-spend starting state. Record real evidence and blockers; ask for approvals only where required. Do not treat a candidate dependency, model, provisional target or planned test as verified. Do not start production implementation before D00 and D01 are complete. Preserve all approved scope, consent and capture-protection boundaries. Maintain the status and handover records described in §23.
 
-**Final readiness disposition:** pre-implementation documentation is prepared. The owner-machine inventory, actual dependency validation, model selection, account-specific privacy review, spending approval and runtime evidence cannot be completed by writing a document. They remain explicit action items with closure criteria. No software implementation, host changes, paid requests, remote repository actions or tests have been carried out by this revision. No additional theoretical planning phase is required; proceed with D00 evidence collection under the existing approval rules.
+**Final readiness disposition:** pre-implementation documentation is prepared. The owner-machine inventory, actual dependency validation, model selection, account-specific privacy review, spending approval and runtime evidence cannot be completed by writing a document. They remain explicit action items with closure criteria. Remote repository and documentation initialization have been carried out. No software implementation, host changes, paid requests or runtime tests have been carried out. No additional theoretical planning phase is required; proceed with D00 evidence collection under the existing approval rules.
