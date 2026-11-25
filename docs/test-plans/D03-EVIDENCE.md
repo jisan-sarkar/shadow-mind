@@ -24,13 +24,17 @@ The 2026-11-26 check used the reference GNOME/Wayland desktop, Node 24.22.3 and 
 | D02 packaged desktop regression | Passed focus, onboarding, three modes, explicit confirmation, synthetic result, pause/resume/stop, window close, clean restart and settings recovery. |
 | D03 pending screen request | Passed. App stop withdrew the portal request and returned status to Off. |
 | D03 audio-only | Passed. The private PipeWire graph delivered the authorized generated tone, reported source loss and had no remaining active link. |
-| D03 combined | The desktop received the synthetic window and audio. Screen receipt continued after audio loss. The GNOME revocation assertion timed out. A repeat with separate screen and audio status checks is needed. |
+| D03 combined | Screen receipt continued after audio loss. The GNOME revocation assertion timed out and has its own acceptance case. |
 | D03 native PNG and JPEG selection | The PNG result reached the expected validated dimensions. The JPEG step timed out. |
 | D03 minimize | Before the desktop notification change, the GNOME/Wayland minimize test left the synthetic audio link active. The new notification Stop input action requires verification in the minimized state. |
 | Frontend dependency audit | No known vulnerabilities reported by `pnpm audit`. |
 | RustSec audit | Exit 0 on 479 crates. Three inherited warnings are `RUSTSEC-2024-0429`, `RUSTSEC-2026-0543` and `RUSTSEC-2024-0370`. The advisory database loaded. The crates.io index refresh reported a local configuration warning. |
 
 The notification revision produced debug bundle SHA-256 `f12323d956d655d2460ecc260d4fe739799ba5e702f7db2d0534def6ed65eb6a`. All 19 automated tests, lint, type checking and locked Clippy passed. The extracted package passed the D02 regression, pending portal cancel, isolated audio disconnection, audio pause, and active-audio window close. In each audio teardown check the private PipeWire graph showed no remaining active link.
+
+The first notification revision turned off screen input when the audio connection closed. The follow-up separated notification lifetime from capture connections. The dedicated `both-isolation` case passed against debug bundle SHA-256 `f655314f0234e060f8a3addb713250566c248145032e19e04e238d4c3520900b`. Both sources reached Receiving locally. After the tone disconnected, audio reported Unavailable, the private PipeWire graph had no active link, and the screen still reported Receiving locally. ShadowMind's Stop live inputs control returned both sources to Off and the app closed normally.
+
+The reference portal advertised window and display selection, and the PipeWire inventory reported two Audio/Source nodes. Display capture and a source scoped to an ordinary application still need acceptance evidence.
 
 ## Repeatable desktop acceptance
 
@@ -52,6 +56,7 @@ The tests use GNOME/Wayland and Python GObject bindings for AT-SPI, GTK and GdkP
 | `denial` | Cancel the GNOME share dialog. The app reports Permission ended. |
 | `screen` | Select only ShadowMind D03 Synthetic Window. The app receives samples and app-driven stop returns the source to Off. |
 | `close` | Select the synthetic window. The app closes during capture and exits successfully. Confirm GNOME's sharing indicator clears. |
+| `both-isolation` | Select the synthetic window. The runner disconnects the tone and verifies that audio is Unavailable, the audio link is gone, and screen stays active. It then stops both sources through ShadowMind. |
 | `both` | Select the synthetic window. The runner disconnects the tone and checks that screen stays active. Stop sharing via GNOME and check that the app reports Permission ended for the screen. |
 | `revoke-first` | Select the synthetic window, then stop sharing via GNOME when prompted. The runner verifies audio stays active before disconnecting it. |
 | `image`, `image-png`, `image-jpeg` | Choose both generated images in turn or a single format. Check the metadata result. |

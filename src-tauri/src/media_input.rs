@@ -186,7 +186,7 @@ async fn receive_unlocked(
         MediaSource::Screen => "ShadowMind screen input",
         MediaSource::Audio(_) => "ShadowMind audio input",
     };
-    let Ok(Ok(control)) = timeout(BUS_TIMEOUT, CaptureIndicator::show(desktop, label)).await else {
+    let Ok(Ok(control)) = timeout(BUS_TIMEOUT, CaptureIndicator::show(label)).await else {
         return NativeStatus::ControlsUnavailable;
     };
     let control = indicator.insert(control);

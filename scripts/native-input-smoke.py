@@ -19,6 +19,11 @@ SMOKE = runpy.run_path(str(Path(__file__).with_name("native-smoke.py")))
 Atspi = SMOKE["Atspi"]
 TONE = "ShadowMind_D03_Synthetic_Audio"
 WINDOW = "ShadowMind D03 Synthetic Window"
+LIVE_STATUSES = (
+    "Off", "Connecting", "Releasing source", "Receiving locally", "Unavailable",
+    "Permission ended", "Suspended", "Release failed. Reopen ShadowMind.",
+    "Desktop stop controls unavailable",
+)
 WINDOW_FIXTURE = """
 import gi
 gi.require_version("Gtk", "3.0")
@@ -137,10 +142,8 @@ class Workspace:
         except AssertionError as failure:
             section = self.find(f"{source} input", "landmark")
             if section:
-                for item in SMOKE["walk"](section):
-                    if item.get_role_name() == "status bar" and "Text" in item.get_interfaces():
-                        text = item.get_text_iface()
-                        actual = Atspi.Text.get_text(text, 0, text.get_character_count())
+                for actual in LIVE_STATUSES:
+                    if SMOKE["named"](section, actual):
                         raise AssertionError(f"{source} status was {actual!r}, expected {name!r}") from failure
             raise
 
@@ -190,7 +193,8 @@ def screen_case(root, case):
             print(f"PASS screen {case}", flush=True)
 
 
-def audio_case(root, combined, revoke_first=False):
+def audio_case(root, case):
+    combined = case != "audio"
     with virtual_audio(root) as (tone, has_active_link):
         with SMOKE["launch"](root, root / "app.log") as (process, app):
             mode = "Both Visual and spoken context" if combined else "Audio Spoken context"
@@ -202,7 +206,7 @@ def audio_case(root, combined, revoke_first=False):
                 workspace.start_window()
                 print(f"Select only {WINDOW} in the GNOME share dialog.", flush=True)
                 workspace.expect_status("Screen", "Receiving locally", 75)
-                if revoke_first:
+                if case == "revoke-first":
                     print("Stop sharing using the GNOME sharing indicator.", flush=True)
                     workspace.expect_status("Screen", "Permission ended", 75)
                     workspace.expect_status("Audio", "Receiving locally")
@@ -211,13 +215,19 @@ def audio_case(root, combined, revoke_first=False):
             tone.wait(timeout=5)
             workspace.expect_status("Audio", "Unavailable")
             wait_for(lambda: not has_active_link(), "release of synthetic PipeWire link")
-            if combined and not revoke_first:
+            if case in {"both", "both-isolation"}:
                 workspace.expect_status("Screen", "Receiving locally")
+                print("PASS the screen stayed active after audio disconnected.", flush=True)
+            if case == "both-isolation":
+                workspace.click("Stop live inputs")
+                workspace.expect_status("Screen", "Off")
+                workspace.expect_status("Audio", "Off")
+            if case == "both":
                 print("Stop sharing using the GNOME sharing indicator.", flush=True)
                 workspace.expect_status("Screen", "Permission ended", 75)
             workspace.close(process)
             print("PASS isolated audio disconnection and resource release", flush=True)
-            if combined:
+            if case in {"both", "revoke-first"}:
                 print("PASS independent combined inputs and GNOME revocation", flush=True)
 
 
@@ -274,10 +284,10 @@ def main():
         if case in {"cancel", "denial", "screen", "close"}:
             screen_case(root, case)
         elif case == "audio":
-            audio_case(root, combined=False)
-        elif case in {"both", "revoke-first"}:
+            audio_case(root, case)
+        elif case in {"both", "both-isolation", "revoke-first"}:
             with child([sys.executable, "-c", WINDOW_FIXTURE], os.environ.copy(), root / "window.log"):
-                audio_case(root, combined=True, revoke_first=case == "revoke-first")
+                audio_case(root, case)
         elif case in {"image", "image-png", "image-jpeg"}:
             image_case(root, ("png", "jpeg") if case == "image" else (case.removeprefix("image-"),))
         elif case in {"pause", "close-audio", "minimize", "lock", "sleep"}:

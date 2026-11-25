@@ -1,6 +1,11 @@
 use ashpd::zbus::{Connection, Proxy, Variant, proxy::SignalStream};
 use futures_util::StreamExt;
 use std::collections::HashMap;
+use tokio::sync::OnceCell;
+
+// GNOME can group notifications by application. Keep their sender alive when
+// a single source closes its dedicated portal connection.
+static NOTIFICATION_BUS: OnceCell<Connection> = OnceCell::const_new();
 
 pub struct CaptureIndicator {
     id: u32,
@@ -10,7 +15,10 @@ pub struct CaptureIndicator {
 }
 
 impl CaptureIndicator {
-    pub async fn show(connection: &Connection, source: &str) -> Result<Self, ashpd::zbus::Error> {
+    pub async fn show(source: &str) -> Result<Self, ashpd::zbus::Error> {
+        let connection = NOTIFICATION_BUS
+            .get_or_try_init(Connection::session)
+            .await?;
         let proxy = Proxy::new(
             connection,
             "org.freedesktop.Notifications",
