@@ -75,6 +75,25 @@ Record actual outputs and failures, not just commands. Pin reviewed GitHub Actio
 
 In repository settings, keep Private, enable Issues, enable squash merges, disable merge commits and rebase merges if desired, and enable deletion of merged feature branches only when it will not delete the persistent dev branch. Keep auto-merge off. Configure main/dev protection or rulesets where supported, require pull requests and passing checks once CI exists, prohibit force pushes and deletion of protected branches. Do not require an independent review from a solo maintainer without an available reviewer. If private-repository rulesets are unavailable on the current plan, follow the same checks manually. Use GitHub Issues and milestones D00–D09. Never claim settings are applied until inspected.
 
+### Owner settings via GitHub CLI (optional)
+
+If an authenticated GitHub CLI is already available and the owner approves the changes, execute the following against this repository only. Otherwise use the repository Settings page. Do not share credentials in chat or install GitHub CLI solely for this step.
+
+```bash
+gh auth status
+gh repo edit jisan-sarkar/shadow-mind \
+  --enable-squash-merge=true \
+  --enable-merge-commit=false \
+  --enable-rebase-merge=false \
+  --enable-auto-merge=false \
+  --delete-branch-on-merge=false \
+  --enable-issues=true \
+  --enable-wiki=false \
+  --enable-discussions=false
+```
+
+Review the resulting settings. Do not change visibility, grant access, enable paid features, or modify branch protection without owner authorization. Keep main and dev permanently. If squash-merging a long-lived dev-to-main promotion, synchronize the main commit into dev with a normal non-destructive merge (never reset or force-push dev), before subsequent work. GitHub milestones and labels may be configured by the owner later; current D00/D01 issues already carry their task IDs and prerequisites.
+
 ## 7. D00 exit
 
 - Actual host inventory recorded.
