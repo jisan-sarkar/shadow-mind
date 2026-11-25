@@ -132,7 +132,17 @@ class Workspace:
             section = self.find(f"{source} input", "landmark")
             return section and SMOKE["named"](section, name)
 
-        return wait_for(status, f"{source} status {name}", seconds)
+        try:
+            return wait_for(status, f"{source} status {name}", seconds)
+        except AssertionError as failure:
+            section = self.find(f"{source} input", "landmark")
+            if section:
+                for item in SMOKE["walk"](section):
+                    if item.get_role_name() == "status bar" and "Text" in item.get_interfaces():
+                        text = item.get_text_iface()
+                        actual = Atspi.Text.get_text(text, 0, text.get_character_count())
+                        raise AssertionError(f"{source} status was {actual!r}, expected {name!r}") from failure
+            raise
 
     def click(self, name, role="button"):
         def ready():

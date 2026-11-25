@@ -30,6 +30,8 @@ The 2026-11-26 check used the reference GNOME/Wayland desktop, Node 24.22.3 and 
 | Frontend dependency audit | No known vulnerabilities reported by `pnpm audit`. |
 | RustSec audit | Exit 0 on 479 crates. Three inherited warnings are `RUSTSEC-2024-0429`, `RUSTSEC-2026-0543` and `RUSTSEC-2024-0370`. The advisory database loaded. The crates.io index refresh reported a local configuration warning. |
 
+The notification revision produced debug bundle SHA-256 `f12323d956d655d2460ecc260d4fe739799ba5e702f7db2d0534def6ed65eb6a`. All 19 automated tests, lint, type checking and locked Clippy passed. The extracted package passed the D02 regression, pending portal cancel, isolated audio disconnection, audio pause, and active-audio window close. In each audio teardown check the private PipeWire graph showed no remaining active link.
+
 ## Repeatable desktop acceptance
 
 Build the debug bundle with the locked dependencies, extract it without installing it, and pass the extracted binary to the smoke scripts from the repository root.

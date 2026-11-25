@@ -42,7 +42,7 @@ impl CaptureIndicator {
                     "",
                     source,
                     "Input remains local. You can stop it here.",
-                    ["stop-input", "Stop input"],
+                    &["stop-input", "Stop input"][..],
                     hints,
                     0_i32,
                 ),
