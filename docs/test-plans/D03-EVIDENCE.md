@@ -25,7 +25,7 @@ The 2026-11-26 check used the reference GNOME/Wayland desktop, Node 24.22.3 and 
 | D03 pending screen request | Passed. App stop withdrew the portal request and returned status to Off. |
 | D03 audio-only | Passed. The private PipeWire graph delivered the authorized generated tone, reported source loss and had no remaining active link. |
 | D03 combined | Screen receipt continued after audio loss. An earlier GNOME revocation check timed out. The dedicated revocation rerun passed, as detailed below. |
-| D03 native PNG and JPEG selection | The PNG result reached the expected validated dimensions. The JPEG step timed out. |
+| D03 native PNG and JPEG selection | The PNG result reached the expected validated dimensions. The first JPEG attempt timed out. The dedicated JPEG and cancellation rerun passed, as detailed below. |
 | D03 minimize | Before the desktop notification change, the GNOME/Wayland minimize test left the synthetic audio link active. The new notification Stop input action requires verification in the minimized state. |
 | Frontend dependency audit | No known vulnerabilities reported by `pnpm audit`. |
 | RustSec audit | Exit 0 on 479 crates. Three inherited warnings are `RUSTSEC-2024-0429`, `RUSTSEC-2026-0543` and `RUSTSEC-2024-0370`. The advisory database loaded. The crates.io index refresh reported a local configuration warning. |
@@ -45,6 +45,8 @@ The `minimize` case remains open on the same bundle. The first run timed out wit
 GNOME suppresses banners for resident notifications while their application has focus. The follow-up removes the resident hint and keeps a zero expiry. Rust formatting, Clippy, all 14 Rust tests, and the debug build passed. The minimized desktop rerun on SHA-256 `0b49393f58a3445ead13e9104f60d2210ae0d65d6274fa34a14914b267390f6f` timed out with audio still active. The D-Bus monitor observed no Stop input action during that run. A confirmed notification click and restoration are still required. [GNOME Shell implementation](https://raw.githubusercontent.com/GNOME/gnome-shell/50.1/js/ui/notificationDaemon.js)
 
 On a later run with the same bundle, the monitor saw GNOME receive the notification with the Stop input button. The desktop runner observed the audio link disappear, reported Off in the workspace, and exited successfully. The monitor did not capture the button's action signal. A follow-up with an explicit focus check after restore timed out while audio was still active. The isolated D-Bus test passed and verified that the application accepts Stop input for its own notification ID and ignores actions for another ID or a different button.
+
+The `image-jpeg-cancel` case passed on GNOME/Wayland with bundle SHA-256 `0b49393f58a3445ead13e9104f60d2210ae0d65d6274fa34a14914b267390f6f`. Canceling the first native chooser removed the waiting status and cleared consent. After fresh consent, the same session opened a new picker and displayed Valid JPEG with the expected 32 × 24 dimensions. The runner exited successfully. Four focused Rust image tests and all five frontend tests passed.
 
 The reference portal advertised window and display selection, and the PipeWire inventory reported two Audio/Source nodes. Display capture and a source scoped to an ordinary application still need acceptance evidence.
 
@@ -73,6 +75,7 @@ The tests use GNOME/Wayland and Python GObject bindings for AT-SPI, GTK and GdkP
 | `both` | Select the synthetic window. The runner disconnects the tone and checks that screen stays active. Stop sharing via GNOME and check that the app reports Permission ended for the screen. |
 | `revoke-first` | Select the synthetic window, then stop sharing via GNOME when prompted. The runner verifies audio stays active before disconnecting it. |
 | `image`, `image-png`, `image-jpeg` | Choose both generated images in turn or a single format. Check the metadata result. |
+| `image-jpeg-cancel` | Cancel the first picker. The runner checks that the request and consent clear. Select the generated JPEG in the reopened picker and verify its metadata. |
 | `pause`, `close-audio` | The runner pauses or closes the app with the synthetic audio link active and checks that the link is released. |
 | `minimize` | Open GNOME notifications from the top-bar clock and choose Stop input on ShadowMind audio input. Restore the app when prompted. The runner checks graph cleanup and Off status. |
 | `lock`, `sleep` | Return after locking or sleeping as prompted. The runner checks audio teardown and verifies that explicit resume leaves the source Off. |

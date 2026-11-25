@@ -308,17 +308,41 @@ def audio_lifecycle_case(root, action):
             print(f"PASS {action} releases audio and requires fresh authorization", flush=True)
 
 
-def image_case(root, formats):
+def image_case(root, formats, cancel_first=False):
     fixture = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 32, 24)
     fixture.fill(0x6837c7ff)
     with SMOKE["launch"](root, root / "app.log") as (process, app):
         workspace = Workspace(app, None)
+        consent = "I have permission to inspect the image I select."
+        waiting = "Waiting for the file chooser…"
+
+        def open_picker():
+            workspace.click(consent, "check box")
+            workspace.click("Choose image")
+            workspace.expect(waiting)
+
+        if cancel_first:
+            open_picker()
+            print("Cancel the GNOME image chooser.", flush=True)
+
+            def cleared():
+                checkbox = workspace.find(consent, "check box")
+                button = workspace.find("Choose image", "button")
+                return (
+                    checkbox and button
+                    and checkbox.get_state_set().contains(Atspi.StateType.SENSITIVE)
+                    and not checkbox.get_state_set().contains(Atspi.StateType.CHECKED)
+                    and not button.get_state_set().contains(Atspi.StateType.SENSITIVE)
+                    and not workspace.find(waiting)
+                )
+
+            wait_for(cleared, "cleared image request and consent", 75)
+            print("PASS cancellation cleared the image request and reset consent", flush=True)
         for codec in formats:
             suffix = "jpg" if codec == "jpeg" else codec
             path = root / f"synthetic-image.{suffix}"
             fixture.savev(str(path), codec, [], [])
-            workspace.click("I have permission to inspect the image I select.", "check box")
-            workspace.click("Choose image")
+            open_picker()
             print(f"Choose this file in the GNOME file chooser: {path}", flush=True)
             workspace.expect(f"Valid {codec.upper()} · 32 × 24 pixels", 75)
             print(f"PASS {codec.upper()} selected in the native file chooser", flush=True)
@@ -339,6 +363,8 @@ def main():
                 audio_case(root, case)
         elif case in {"image", "image-png", "image-jpeg"}:
             image_case(root, ("png", "jpeg") if case == "image" else (case.removeprefix("image-"),))
+        elif case == "image-jpeg-cancel":
+            image_case(root, ("jpeg",), cancel_first=True)
         elif case in {"pause", "close-audio", "minimize", "lock", "sleep"}:
             audio_lifecycle_case(root, case)
         else:
