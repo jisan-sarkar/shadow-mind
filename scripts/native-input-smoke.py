@@ -178,17 +178,17 @@ def screen_case(root, case):
             workspace.start_window()
             if case == "denial":
                 print("Cancel the GNOME share dialog.", flush=True)
-                workspace.expect("Permission ended", 75)
+                workspace.expect_status("Screen", "Permission ended", 75)
+                assert not workspace.find("Stop live inputs", "button")
+                workspace.start_window()
             elif case != "cancel":
                 print(f"Select only {WINDOW} in the GNOME share dialog.", flush=True)
                 workspace.expect("Receiving locally", 75)
             if case == "close":
                 workspace.close(process)
             else:
-                if case != "denial":
-                    workspace.click("Stop live inputs")
-                    workspace.expect("Off")
-                    assert not workspace.find("Receiving locally")
+                workspace.click("Stop live inputs")
+                workspace.expect_status("Screen", "Off")
                 workspace.close(process)
             print(f"PASS screen {case}", flush=True)
 
