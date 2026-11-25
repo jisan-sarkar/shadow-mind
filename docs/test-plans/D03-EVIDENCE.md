@@ -40,6 +40,8 @@ The `denial` case passed on the same bundle. Canceling the initial request from 
 
 The `close` case passed on the same bundle. The runner selected the synthetic window through the normal GNOME dialog with user consent, verified Receiving locally, and observed a new PipeWire video node. It closed ShadowMind through the window control and verified exit code 0 and removal of the video node while the synthetic window was still running. The GNOME top-bar indicator is a separate visual check.
 
+The `minimize` case remains open on the same bundle. The first run timed out with the synthetic audio link still active. In two retries the link disappeared, but the runner could not verify Off in the restored workspace. The monitored attempt did not show the Stop input action signal during the test. The runner now checks that audio is active after minimizing and rejects process exit as evidence that the notification stopped capture. A separate pause regression passed.
+
 The reference portal advertised window and display selection, and the PipeWire inventory reported two Audio/Source nodes. Display capture and a source scoped to an ordinary application still need acceptance evidence.
 
 ## Repeatable desktop acceptance

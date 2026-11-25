@@ -267,15 +267,32 @@ def audio_lifecycle_case(root, action):
             else:
                 workspace.click("Pause" if action == "pause" else "Minimize")
                 if action == "minimize":
+                    assert has_active_link(), "audio stopped before the desktop control could be tested"
                     print("Open GNOME notifications and choose Stop input on ShadowMind audio input.", flush=True)
-            wait_for(lambda: not has_active_link(), f"PipeWire link release on {action}", 60)
+            def capture_released():
+                if action == "minimize" and process.poll() is not None:
+                    raise AssertionError(
+                        f"ShadowMind exited with status {process.returncode} before the desktop stop was verified"
+                    )
+                return not has_active_link()
+
+            wait_for(
+                capture_released,
+                f"PipeWire link release on {action}",
+                120 if action == "minimize" else 60,
+            )
             if action != "close-audio":
                 if action == "minimize":
                     print("Restore the ShadowMind window to check that audio is Off.", flush=True)
+                    workspace.app = wait_for(
+                        lambda: SMOKE["root_for"](process.pid),
+                        "restored ShadowMind accessibility tree",
+                        60,
+                    )
                 if action != "minimize" or workspace.find("Paused"):
                     workspace.expect("Paused", 60)
                     workspace.click("Resume")
-                workspace.expect_status("Audio", "Off")
+                workspace.expect_status("Audio", "Off", 60 if action == "minimize" else 8)
                 assert not has_active_link()
                 workspace.close(process)
             print(f"PASS {action} releases audio and requires fresh authorization", flush=True)
