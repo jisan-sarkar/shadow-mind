@@ -37,10 +37,9 @@ impl CaptureIndicator {
         }
         let actions = proxy.receive_signal("ActionInvoked").await?;
         let closed = proxy.receive_signal("NotificationClosed").await?;
-        let hints = HashMap::from([
-            ("resident", Variant::from(true)),
-            ("suppress-sound", Variant::from(true)),
-        ]);
+        // GNOME suppresses resident banners while their application has focus.
+        // Keep this notification in the list until it is acted on or removed.
+        let hints = HashMap::from([("suppress-sound", Variant::from(true))]);
         let id = proxy
             .call(
                 "Notify",

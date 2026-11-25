@@ -42,6 +42,8 @@ The `close` case passed on the same bundle. The runner selected the synthetic wi
 
 The `minimize` case remains open on the same bundle. The first run timed out with the synthetic audio link still active. In two retries the link disappeared, but the runner could not verify Off in the restored workspace. The monitored attempt did not show the Stop input action signal during the test. The runner now checks that audio is active after minimizing and rejects process exit as evidence that the notification stopped capture. A separate pause regression passed.
 
+GNOME suppresses banners for resident notifications while their application has focus. The follow-up removes the resident hint and keeps a zero expiry. Rust formatting, Clippy, all 14 Rust tests, and the debug build passed. The minimized desktop rerun on SHA-256 `0b49393f58a3445ead13e9104f60d2210ae0d65d6274fa34a14914b267390f6f` timed out with audio still active. The D-Bus monitor observed no Stop input action during that run. A confirmed notification click and restoration are still required. [GNOME Shell implementation](https://raw.githubusercontent.com/GNOME/gnome-shell/50.1/js/ui/notificationDaemon.js)
+
 The reference portal advertised window and display selection, and the PipeWire inventory reported two Audio/Source nodes. Display capture and a source scoped to an ordinary application still need acceptance evidence.
 
 ## Repeatable desktop acceptance
