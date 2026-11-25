@@ -284,9 +284,19 @@ def audio_lifecycle_case(root, action):
             if action != "close-audio":
                 if action == "minimize":
                     print("Restore the ShadowMind window to check that audio is Off.", flush=True)
+
+                    def restored_workspace():
+                        if process.poll() is not None:
+                            raise AssertionError("ShadowMind exited before its window was restored")
+                        current = SMOKE["root_for"](process.pid)
+                        frame = SMOKE["named"](current, "ShadowMind", "frame")
+                        if frame and frame.get_state_set().contains(Atspi.StateType.ACTIVE):
+                            return current
+                        return None
+
                     workspace.app = wait_for(
-                        lambda: SMOKE["root_for"](process.pid),
-                        "restored ShadowMind accessibility tree",
+                        restored_workspace,
+                        "restored and focused ShadowMind window",
                         60,
                     )
                 if action != "minimize" or workspace.find("Paused"):

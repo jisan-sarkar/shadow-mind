@@ -44,6 +44,8 @@ The `minimize` case remains open on the same bundle. The first run timed out wit
 
 GNOME suppresses banners for resident notifications while their application has focus. The follow-up removes the resident hint and keeps a zero expiry. Rust formatting, Clippy, all 14 Rust tests, and the debug build passed. The minimized desktop rerun on SHA-256 `0b49393f58a3445ead13e9104f60d2210ae0d65d6274fa34a14914b267390f6f` timed out with audio still active. The D-Bus monitor observed no Stop input action during that run. A confirmed notification click and restoration are still required. [GNOME Shell implementation](https://raw.githubusercontent.com/GNOME/gnome-shell/50.1/js/ui/notificationDaemon.js)
 
+On a later run with the same bundle, the monitor saw GNOME receive the notification with the Stop input button. The desktop runner observed the audio link disappear, reported Off in the workspace, and exited successfully. The monitor did not capture the button's action signal. A follow-up with an explicit focus check after restore timed out while audio was still active. The isolated D-Bus test passed and verified that the application accepts Stop input for its own notification ID and ignores actions for another ID or a different button.
+
 The reference portal advertised window and display selection, and the PipeWire inventory reported two Audio/Source nodes. Display capture and a source scoped to an ordinary application still need acceptance evidence.
 
 ## Repeatable desktop acceptance
@@ -57,6 +59,7 @@ dpkg-deb -x src-tauri/target/debug/bundle/deb/ShadowMind_0.1.0_amd64.deb "$stage
 python3 scripts/native-smoke.py "$stage/usr/bin/shadow-mind"
 SHADOWMIND_INPUT_TEST=cancel python3 scripts/native-input-smoke.py "$stage/usr/bin/shadow-mind"
 SHADOWMIND_INPUT_TEST=audio python3 scripts/native-input-smoke.py "$stage/usr/bin/shadow-mind"
+dbus-run-session -- cargo test --manifest-path src-tauri/Cargo.toml --locked only_the_matching_stop_action_ends_capture -- --ignored
 ```
 
 The tests use GNOME/Wayland and Python GObject bindings for AT-SPI, GTK and GdkPixbuf. The audio cases also use PipeWire, WirePlumber and the GStreamer PipeWire plug-in. The runner creates the synthetic window, tone, PNG and JPEG and uses disposable profiles. Run each remaining case by substituting its value for `SHADOWMIND_INPUT_TEST`.

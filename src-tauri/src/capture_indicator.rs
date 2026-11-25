@@ -91,3 +91,59 @@ impl CaptureIndicator {
             .await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    #[tokio::test]
+    #[ignore = "run under dbus-run-session to isolate notification signals"]
+    async fn only_the_matching_stop_action_ends_capture() {
+        const PATH: &str = "/org/freedesktop/Notifications";
+        const INTERFACE: &str = "org.freedesktop.Notifications";
+        let service = Connection::session().await.unwrap();
+        let client = Connection::session().await.unwrap();
+        let proxy = Proxy::new(
+            &client,
+            service.unique_name().unwrap().clone(),
+            PATH,
+            INTERFACE,
+        )
+        .await
+        .unwrap();
+        let mut indicator = CaptureIndicator {
+            id: 42,
+            actions: proxy.receive_signal("ActionInvoked").await.unwrap(),
+            closed: proxy.receive_signal("NotificationClosed").await.unwrap(),
+            proxy,
+        };
+        let mut stop = tokio::spawn(async move { indicator.stop_requested().await });
+        for action in [(41_u32, "stop-input"), (42_u32, "default")] {
+            service
+                .emit_signal(None::<()>, PATH, INTERFACE, "ActionInvoked", &action)
+                .await
+                .unwrap();
+        }
+        assert!(
+            timeout(Duration::from_millis(100), &mut stop)
+                .await
+                .is_err()
+        );
+        service
+            .emit_signal(
+                None::<()>,
+                PATH,
+                INTERFACE,
+                "ActionInvoked",
+                &(42_u32, "stop-input"),
+            )
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(2), stop)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}
