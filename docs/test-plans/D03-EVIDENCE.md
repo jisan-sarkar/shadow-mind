@@ -50,6 +50,8 @@ The `image-jpeg-cancel` case passed on GNOME/Wayland with bundle SHA-256 `0b4939
 
 The original lock check reached a real GNOME lock while the synthetic audio link remained active. The updated build subscribes to LockedHint changes on the resolved logind session. The complete `lock` case passed with bundle SHA-256 `4f63ff4314092bb46842dad4ab87eb0199bbcf6a6b794d6f4f9768fc7ff1db73`. The audio link disappeared and the image picker's dedicated D-Bus connection closed while the desktop was locked and ShadowMind was still running. After normal unlock, ShadowMind stayed Paused. Explicit Resume left audio Off and required fresh consent for audio and image input. Rust formatting, locked Clippy, and all 14 regular Rust tests passed.
 
+The suspend/resume follow-up adds a bounded logind sleep delay and uses the same cleanup tracking as window close. The source workers also check whether logind is already preparing for sleep before starting input. Rust formatting and the locked library type check passed. Native suspend/resume acceptance remains pending.
+
 The reference portal advertised window and display selection, and the PipeWire inventory reported two Audio/Source nodes. Display capture and a source scoped to an ordinary application still need acceptance evidence.
 
 ## Repeatable desktop acceptance

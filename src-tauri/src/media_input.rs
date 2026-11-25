@@ -4,7 +4,10 @@ use ashpd::{
         PersistMode, ResponseError, Session,
         screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
     },
-    zbus::{Connection, OwnedObjectPath, OwnedVariant, Proxy, Variant, proxy::SignalStream},
+    zbus::{
+        Connection, OwnedFd as BusFd, OwnedObjectPath, OwnedVariant, Proxy, Variant,
+        proxy::{Builder, CacheProperties, SignalStream},
+    },
 };
 use futures_util::{Stream, StreamExt};
 use gstreamer::{self as gst, prelude::*};
@@ -22,6 +25,7 @@ pub const BUS_TIMEOUT: Duration = Duration::from_secs(5);
 pub const PORTAL_TIMEOUT: Duration = Duration::from_secs(120);
 const REVOCATION_GRACE: Duration = Duration::from_millis(350);
 const LOGIN_SERVICE: &str = "org.freedesktop.login1";
+const LOGIN_MANAGER: &str = "org.freedesktop.login1.Manager";
 const LOGIN_SESSION: &str = "org.freedesktop.login1.Session";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
@@ -179,10 +183,10 @@ async fn receive_unlocked(
     available: impl Fn(),
 ) -> NativeStatus {
     let setup = lifecycle_streams(system);
-    let Ok(Ok((mut locks, mut sleeps, locked))) = timeout(BUS_TIMEOUT, setup).await else {
+    let Ok(Ok(mut lifecycle)) = timeout(BUS_TIMEOUT, setup).await else {
         return NativeStatus::Unavailable;
     };
-    if locked {
+    if lifecycle.locked || lifecycle.sleeping {
         return NativeStatus::Suspended;
     }
     let label = match &source {
@@ -204,23 +208,29 @@ async fn receive_unlocked(
     };
     tokio::select! {
         biased;
-        _ = wait_for_lock(&mut locks) => NativeStatus::Suspended,
-        _ = sleeps.next() => NativeStatus::Suspended,
+        _ = wait_for_lock(&mut lifecycle.locks) => NativeStatus::Suspended,
+        _ = wait_for_sleep(&mut lifecycle.sleeps) => NativeStatus::Suspended,
         _ = control.stop_requested() => NativeStatus::Idle,
         result = capture => result,
     }
 }
 
-async fn lifecycle_streams(
-    system: &Connection,
-) -> Result<(SignalStream<'static>, SignalStream<'static>, bool), ashpd::zbus::Error> {
-    let login = Proxy::new(
-        system,
-        LOGIN_SERVICE,
-        "/org/freedesktop/login1",
-        "org.freedesktop.login1.Manager",
-    )
-    .await?;
+struct DesktopLifecycle {
+    login: Proxy<'static>,
+    locks: SignalStream<'static>,
+    sleeps: SignalStream<'static>,
+    locked: bool,
+    sleeping: bool,
+}
+
+async fn lifecycle_streams(system: &Connection) -> Result<DesktopLifecycle, ashpd::zbus::Error> {
+    let login: Proxy<'static> = Builder::new(system)
+        .destination(LOGIN_SERVICE)
+        .path("/org/freedesktop/login1")
+        .interface(LOGIN_MANAGER)
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await?;
     // Signals are emitted on the resolved session path, outside the "auto" alias.
     let path: OwnedObjectPath = login.call("GetSession", &("auto",)).await?;
     let properties = Proxy::new(
@@ -237,8 +247,14 @@ async fn lifecycle_streams(
     let locked: OwnedVariant = properties
         .call("Get", &(LOGIN_SESSION, "LockedHint"))
         .await?;
-    let locked = bool::try_from(locked)?;
-    Ok((locks, sleeps, locked))
+    let sleeping = login.get_property("PreparingForSleep").await?;
+    Ok(DesktopLifecycle {
+        login,
+        locks,
+        sleeps,
+        locked: bool::try_from(locked)?,
+        sleeping,
+    })
 }
 
 async fn next_lock_change(locks: &mut SignalStream<'static>) -> Option<bool> {
@@ -261,35 +277,71 @@ async fn wait_for_lock(locks: &mut SignalStream<'static>) {
     while next_lock_change(locks).await == Some(false) {}
 }
 
-pub async fn watch_desktop(suspend: impl Fn(), resume: impl Fn()) {
+async fn next_sleep_change(sleeps: &mut SignalStream<'static>) -> Option<bool> {
+    sleeps
+        .next()
+        .await
+        .and_then(|message| message.body().deserialize::<bool>().ok())
+}
+
+async fn wait_for_sleep(sleeps: &mut SignalStream<'static>) {
+    while next_sleep_change(sleeps).await == Some(false) {}
+}
+
+pub async fn watch_desktop<F>(suspend: impl Fn(), resume: impl Fn(), drain: impl Fn() -> F)
+where
+    F: Future<Output = ()> + Send,
+{
     loop {
         let setup = async {
             let system = Connection::system().await?;
             lifecycle_streams(&system).await
         };
-        if let Ok(Ok((mut locks, mut sleeps, mut locked))) = timeout(BUS_TIMEOUT, setup).await {
-            let mut sleeping = false;
-            if locked {
-                suspend()
-            } else {
-                resume()
-            }
+        if let Ok(Ok(mut lifecycle)) = timeout(BUS_TIMEOUT, setup).await {
+            let mut delay = None;
             loop {
-                tokio::select! {
-                    state = next_lock_change(&mut locks) => {
-                        let Some(state) = state else { break };
-                        locked = state;
-                    }
-                    message = sleeps.next() => {
-                        let Some(state) = message.and_then(|message| message.body().deserialize::<bool>().ok())
-                            else { break };
-                        sleeping = state;
-                    }
+                if !lifecycle.sleeping && delay.is_none() {
+                    let acquire = async {
+                        let guard: BusFd = lifecycle
+                            .login
+                            .call(
+                                "Inhibit",
+                                &(
+                                    "sleep",
+                                    "ShadowMind",
+                                    "Release authorized inputs before sleep",
+                                    "delay",
+                                ),
+                            )
+                            .await?;
+                        let preparing: bool =
+                            lifecycle.login.get_property("PreparingForSleep").await?;
+                        Ok::<_, ashpd::zbus::Error>((guard, preparing))
+                    };
+                    let Ok(Ok((guard, preparing))) = timeout(BUS_TIMEOUT, acquire).await else {
+                        break;
+                    };
+                    lifecycle.sleeping = preparing;
+                    delay = Some(guard);
                 }
-                if locked || sleeping {
-                    suspend()
+                if lifecycle.locked || lifecycle.sleeping {
+                    suspend();
                 } else {
-                    resume()
+                    resume();
+                }
+                if lifecycle.sleeping && delay.is_some() {
+                    let _ = timeout(BUS_TIMEOUT, drain()).await;
+                    drop(delay.take());
+                }
+                tokio::select! {
+                    state = next_lock_change(&mut lifecycle.locks) => {
+                        let Some(state) = state else { break };
+                        lifecycle.locked = state;
+                    }
+                    state = next_sleep_change(&mut lifecycle.sleeps) => {
+                        let Some(state) = state else { break };
+                        lifecycle.sleeping = state;
+                    }
                 }
             }
         }

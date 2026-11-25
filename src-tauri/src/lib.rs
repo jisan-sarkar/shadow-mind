@@ -429,6 +429,13 @@ async fn complete_fixture(app: AppHandle, work: SessionWork) {
     }
 }
 
+async fn wait_for_input_cleanup(app: &AppHandle) {
+    let state = app.state::<Mutex<Foundation>>();
+    while state.lock().is_ok_and(|state| state.session.draining()) {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -439,9 +446,11 @@ pub fn run() {
             app.manage(Mutex::new(foundation));
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                let app = &handle;
                 media_input::watch_desktop(
-                    || update_lifecycle(&handle, |session| session.set_desktop_suspended(true)),
-                    || update_lifecycle(&handle, |session| session.set_desktop_suspended(false)),
+                    || update_lifecycle(app, |session| session.set_desktop_suspended(true)),
+                    || update_lifecycle(app, |session| session.set_desktop_suspended(false)),
+                    || wait_for_input_cleanup(app),
                 )
                 .await;
             });
@@ -473,13 +482,11 @@ pub fn run() {
                 if begin_close {
                     let window = window.clone();
                     tauri::async_runtime::spawn(async move {
-                        let drain = async {
-                            let state = window.state::<Mutex<Foundation>>();
-                            while state.lock().is_ok_and(|state| state.session.draining()) {
-                                tokio::time::sleep(Duration::from_millis(25)).await;
-                            }
-                        };
-                        let _ = tokio::time::timeout(Duration::from_secs(7), drain).await;
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(7),
+                            wait_for_input_cleanup(window.app_handle()),
+                        )
+                        .await;
                         let _ = window.destroy();
                     });
                 }
