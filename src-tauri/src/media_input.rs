@@ -4,13 +4,14 @@ use ashpd::{
         PersistMode, ResponseError, Session,
         screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
     },
-    zbus::{Connection, Proxy},
+    zbus::{Connection, OwnedObjectPath, OwnedVariant, Proxy, Variant, proxy::SignalStream},
 };
 use futures_util::{Stream, StreamExt};
 use gstreamer::{self as gst, prelude::*};
 use gstreamer_app::AppSink;
 use serde::Serialize;
 use std::{
+    collections::HashMap,
     os::fd::{AsRawFd, OwnedFd},
     time::Duration,
 };
@@ -20,6 +21,8 @@ use uuid::Uuid;
 pub const BUS_TIMEOUT: Duration = Duration::from_secs(5);
 pub const PORTAL_TIMEOUT: Duration = Duration::from_secs(120);
 const REVOCATION_GRACE: Duration = Duration::from_millis(350);
+const LOGIN_SERVICE: &str = "org.freedesktop.login1";
+const LOGIN_SESSION: &str = "org.freedesktop.login1.Session";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,7 +178,7 @@ async fn receive_unlocked(
     indicator: &mut Option<CaptureIndicator>,
     available: impl Fn(),
 ) -> NativeStatus {
-    let setup = lifecycle_streams(desktop, system);
+    let setup = lifecycle_streams(system);
     let Ok(Ok((mut locks, mut sleeps, locked))) = timeout(BUS_TIMEOUT, setup).await else {
         return NativeStatus::Unavailable;
     };
@@ -201,7 +204,7 @@ async fn receive_unlocked(
     };
     tokio::select! {
         biased;
-        _ = locks.next() => NativeStatus::Suspended,
+        _ = wait_for_lock(&mut locks) => NativeStatus::Suspended,
         _ = sleeps.next() => NativeStatus::Suspended,
         _ = control.stop_requested() => NativeStatus::Idle,
         result = capture => result,
@@ -209,47 +212,62 @@ async fn receive_unlocked(
 }
 
 async fn lifecycle_streams(
-    desktop: &Connection,
     system: &Connection,
-) -> Result<
-    (
-        ashpd::zbus::proxy::SignalStream<'static>,
-        ashpd::zbus::proxy::SignalStream<'static>,
-        bool,
-    ),
-    ashpd::zbus::Error,
-> {
-    let screen_saver = Proxy::new(
-        desktop,
-        "org.gnome.ScreenSaver",
-        "/org/gnome/ScreenSaver",
-        "org.gnome.ScreenSaver",
-    )
-    .await?;
+) -> Result<(SignalStream<'static>, SignalStream<'static>, bool), ashpd::zbus::Error> {
     let login = Proxy::new(
         system,
-        "org.freedesktop.login1",
+        LOGIN_SERVICE,
         "/org/freedesktop/login1",
         "org.freedesktop.login1.Manager",
     )
     .await?;
-    let locks = screen_saver.receive_signal("ActiveChanged").await?;
+    // Signals are emitted on the resolved session path, outside the "auto" alias.
+    let path: OwnedObjectPath = login.call("GetSession", &("auto",)).await?;
+    let properties = Proxy::new(
+        system,
+        LOGIN_SERVICE,
+        path,
+        "org.freedesktop.DBus.Properties",
+    )
+    .await?;
+    let locks = properties
+        .receive_signal_with_args("PropertiesChanged", &[(0, LOGIN_SESSION)])
+        .await?;
     let sleeps = login.receive_signal("PrepareForSleep").await?;
-    let locked = screen_saver.call::<_, _, bool>("GetActive", &()).await?;
+    let locked: OwnedVariant = properties
+        .call("Get", &(LOGIN_SESSION, "LockedHint"))
+        .await?;
+    let locked = bool::try_from(locked)?;
     Ok((locks, sleeps, locked))
+}
+
+async fn next_lock_change(locks: &mut SignalStream<'static>) -> Option<bool> {
+    while let Some(signal) = locks.next().await {
+        let body = signal.body();
+        let (_, mut changed, invalidated) = body
+            .deserialize::<(&str, HashMap<&str, Variant<'_>>, Vec<&str>)>()
+            .ok()?;
+        if let Some(locked) = changed.remove("LockedHint") {
+            return locked.downcast().ok();
+        }
+        if invalidated.contains(&"LockedHint") {
+            return None;
+        }
+    }
+    None
+}
+
+async fn wait_for_lock(locks: &mut SignalStream<'static>) {
+    while next_lock_change(locks).await == Some(false) {}
 }
 
 pub async fn watch_desktop(suspend: impl Fn(), resume: impl Fn()) {
     loop {
         let setup = async {
-            let desktop = Connection::session().await?;
             let system = Connection::system().await?;
-            let streams = lifecycle_streams(&desktop, &system).await?;
-            Ok::<_, ashpd::zbus::Error>((desktop, system, streams))
+            lifecycle_streams(&system).await
         };
-        if let Ok(Ok((_desktop, _system, (mut locks, mut sleeps, mut locked)))) =
-            timeout(BUS_TIMEOUT, setup).await
-        {
+        if let Ok(Ok((mut locks, mut sleeps, mut locked))) = timeout(BUS_TIMEOUT, setup).await {
             let mut sleeping = false;
             if locked {
                 suspend()
@@ -257,19 +275,16 @@ pub async fn watch_desktop(suspend: impl Fn(), resume: impl Fn()) {
                 resume()
             }
             loop {
-                let (from_lock, signal) = tokio::select! {
-                    message = locks.next() => (true, message),
-                    message = sleeps.next() => (false, message),
-                };
-                let Some(active) =
-                    signal.and_then(|message| message.body().deserialize::<bool>().ok())
-                else {
-                    break;
-                };
-                if from_lock {
-                    locked = active
-                } else {
-                    sleeping = active
+                tokio::select! {
+                    state = next_lock_change(&mut locks) => {
+                        let Some(state) = state else { break };
+                        locked = state;
+                    }
+                    message = sleeps.next() => {
+                        let Some(state) = message.and_then(|message| message.body().deserialize::<bool>().ok())
+                            else { break };
+                        sleeping = state;
+                    }
                 }
                 if locked || sleeping {
                     suspend()

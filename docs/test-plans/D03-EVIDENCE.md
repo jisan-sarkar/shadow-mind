@@ -48,6 +48,8 @@ On a later run with the same bundle, the monitor saw GNOME receive the notificat
 
 The `image-jpeg-cancel` case passed on GNOME/Wayland with bundle SHA-256 `0b49393f58a3445ead13e9104f60d2210ae0d65d6274fa34a14914b267390f6f`. Canceling the first native chooser removed the waiting status and cleared consent. After fresh consent, the same session opened a new picker and displayed Valid JPEG with the expected 32 × 24 dimensions. The runner exited successfully. Four focused Rust image tests and all five frontend tests passed.
 
+The original lock check reached a real GNOME lock while the synthetic audio link remained active. The updated build subscribes to LockedHint changes on the resolved logind session. The complete `lock` case passed with bundle SHA-256 `4f63ff4314092bb46842dad4ab87eb0199bbcf6a6b794d6f4f9768fc7ff1db73`. The audio link disappeared and the image picker's dedicated D-Bus connection closed while the desktop was locked and ShadowMind was still running. After normal unlock, ShadowMind stayed Paused. Explicit Resume left audio Off and required fresh consent for audio and image input. Rust formatting, locked Clippy, and all 14 regular Rust tests passed.
+
 The reference portal advertised window and display selection, and the PipeWire inventory reported two Audio/Source nodes. Display capture and a source scoped to an ordinary application still need acceptance evidence.
 
 ## Repeatable desktop acceptance
@@ -78,7 +80,8 @@ The tests use GNOME/Wayland and Python GObject bindings for AT-SPI, GTK and GdkP
 | `image-jpeg-cancel` | Cancel the first picker. The runner checks that the request and consent clear. Select the generated JPEG in the reopened picker and verify its metadata. |
 | `pause`, `close-audio` | The runner pauses or closes the app with the synthetic audio link active and checks that the link is released. |
 | `minimize` | Open GNOME notifications from the top-bar clock and choose Stop input on ShadowMind audio input. Restore the app when prompted. The runner checks graph cleanup and Off status. |
-| `lock`, `sleep` | Return after locking or sleeping as prompted. The runner checks audio teardown and verifies that explicit resume leaves the source Off. |
+| `lock` | Lock GNOME with the picker open. Wait about 10 seconds and unlock normally. The runner checks that the audio link and picker connection close while locked, then verifies explicit resume and fresh consent. |
+| `sleep` | Return after sleeping as prompted. The runner checks audio teardown and verifies that explicit resume leaves the source Off. |
 
 On the reference desktop, repeat lock/unlock and suspend/resume with the image chooser open. Check that pending requests are withdrawn, late results are discarded, and reopening the chooser requires a fresh confirmation. Verify screen cleanup through the GNOME sharing indicator and audio cleanup through the private PipeWire graph. Test a full display only on a controlled desktop showing synthetic content. Record the supported microphone and authorized application-audio choices, including any capabilities the host does not expose.
 

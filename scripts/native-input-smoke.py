@@ -19,6 +19,8 @@ SMOKE = runpy.run_path(str(Path(__file__).with_name("native-smoke.py")))
 Atspi = SMOKE["Atspi"]
 TONE = "ShadowMind_D03_Synthetic_Audio"
 WINDOW = "ShadowMind D03 Synthetic Window"
+IMAGE_CONSENT = "I have permission to inspect the image I select."
+IMAGE_PENDING = "Waiting for the file chooser…"
 LIVE_STATUSES = (
     "Off", "Connecting", "Releasing source", "Receiving locally", "Unavailable",
     "Permission ended", "Suspended", "Release failed. Reopen ShadowMind.",
@@ -166,6 +168,22 @@ class Workspace:
                    "check box")
         self.click("Start audio input")
 
+    def open_image_picker(self):
+        self.click(IMAGE_CONSENT, "check box")
+        self.click("Choose image")
+        self.expect(IMAGE_PENDING)
+
+    def image_consent_reset(self):
+        checkbox = self.find(IMAGE_CONSENT, "check box")
+        button = self.find("Choose image", "button")
+        return (
+            checkbox and button
+            and checkbox.get_state_set().contains(Atspi.StateType.SENSITIVE)
+            and not checkbox.get_state_set().contains(Atspi.StateType.CHECKED)
+            and not button.get_state_set().contains(Atspi.StateType.SENSITIVE)
+            and not self.find(IMAGE_PENDING)
+        )
+
     def close(self, process):
         self.click("Close")
         assert process.wait(timeout=10) == 0
@@ -262,7 +280,7 @@ def audio_lifecycle_case(root, action):
             wait_for(has_active_link, "synthetic PipeWire link")
             if action == "close-audio":
                 workspace.close(process)
-            elif action in {"lock", "sleep"}:
+            elif action == "sleep":
                 print(f"Use GNOME to {action} the desktop, then return to it.", flush=True)
             else:
                 workspace.click("Pause" if action == "pause" else "Minimize")
@@ -308,41 +326,85 @@ def audio_lifecycle_case(root, action):
             print(f"PASS {action} releases audio and requires fresh authorization", flush=True)
 
 
+def lock_case(root):
+    session = subprocess.check_output(
+        ["loginctl", "show-user", str(os.getuid()), "-p", "Display", "--value"],
+        text=True,
+        timeout=4,
+    ).strip()
+    assert session, "reference desktop session unavailable"
+
+    def locked():
+        return subprocess.check_output(
+            ["loginctl", "show-session", session, "-p", "LockedHint", "--value"],
+            text=True,
+            timeout=4,
+        ).strip() == "yes"
+
+    assert not locked(), "start the lock test on the unlocked desktop"
+    with virtual_audio(root) as (_, has_active_link):
+        with SMOKE["launch"](root, root / "app.log") as (process, app):
+            workspace = Workspace(app, "Both Visual and spoken context")
+            workspace.start_audio()
+            workspace.expect_status("Audio", "Receiving locally")
+            wait_for(has_active_link, "synthetic PipeWire link")
+
+            def application_bus_names():
+                names = subprocess.check_output(
+                    ["busctl", "--user", "--no-legend", "--no-pager", "list"],
+                    text=True,
+                    timeout=4,
+                )
+                return {
+                    fields[0] for fields in (line.split() for line in names.splitlines())
+                    if len(fields) > 1 and fields[0].startswith(":") and fields[1] == str(process.pid)
+                }
+
+            earlier_names = application_bus_names()
+            workspace.open_image_picker()
+            picker_names = wait_for(
+                lambda: application_bus_names() - earlier_names,
+                "dedicated image picker bus connection",
+            )
+            print("Lock GNOME without closing the image chooser.", flush=True)
+            wait_for(locked, "GNOME desktop lock", 120)
+            wait_for(
+                lambda: locked() and not has_active_link()
+                and picker_names.isdisjoint(application_bus_names()),
+                "audio and picker release while locked",
+            )
+            assert process.poll() is None, "ShadowMind exited during desktop lock"
+            print("PASS audio and the picker were released while GNOME was locked. Unlock the desktop.", flush=True)
+            wait_for(lambda: not locked(), "GNOME desktop unlock", 120)
+            workspace.app = wait_for(lambda: SMOKE["root_for"](process.pid), "workspace after unlock")
+            workspace.expect("Paused")
+            assert not workspace.find(IMAGE_PENDING)
+            assert not has_active_link()
+            workspace.click("Resume")
+            workspace.expect_status("Audio", "Off")
+            wait_for(workspace.image_consent_reset, "cleared image request and fresh consent")
+            start = workspace.find("Start audio input", "button")
+            assert start and not start.get_state_set().contains(Atspi.StateType.SENSITIVE)
+            assert not has_active_link()
+            workspace.close(process)
+            print("PASS unlock preserved pause and required fresh consent", flush=True)
+
+
 def image_case(root, formats, cancel_first=False):
     fixture = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 32, 24)
     fixture.fill(0x6837c7ff)
     with SMOKE["launch"](root, root / "app.log") as (process, app):
         workspace = Workspace(app, None)
-        consent = "I have permission to inspect the image I select."
-        waiting = "Waiting for the file chooser…"
-
-        def open_picker():
-            workspace.click(consent, "check box")
-            workspace.click("Choose image")
-            workspace.expect(waiting)
-
         if cancel_first:
-            open_picker()
+            workspace.open_image_picker()
             print("Cancel the GNOME image chooser.", flush=True)
-
-            def cleared():
-                checkbox = workspace.find(consent, "check box")
-                button = workspace.find("Choose image", "button")
-                return (
-                    checkbox and button
-                    and checkbox.get_state_set().contains(Atspi.StateType.SENSITIVE)
-                    and not checkbox.get_state_set().contains(Atspi.StateType.CHECKED)
-                    and not button.get_state_set().contains(Atspi.StateType.SENSITIVE)
-                    and not workspace.find(waiting)
-                )
-
-            wait_for(cleared, "cleared image request and consent", 75)
+            wait_for(workspace.image_consent_reset, "cleared image request and consent", 75)
             print("PASS cancellation cleared the image request and reset consent", flush=True)
         for codec in formats:
             suffix = "jpg" if codec == "jpeg" else codec
             path = root / f"synthetic-image.{suffix}"
             fixture.savev(str(path), codec, [], [])
-            open_picker()
+            workspace.open_image_picker()
             print(f"Choose this file in the GNOME file chooser: {path}", flush=True)
             workspace.expect(f"Valid {codec.upper()} · 32 × 24 pixels", 75)
             print(f"PASS {codec.upper()} selected in the native file chooser", flush=True)
@@ -365,7 +427,9 @@ def main():
             image_case(root, ("png", "jpeg") if case == "image" else (case.removeprefix("image-"),))
         elif case == "image-jpeg-cancel":
             image_case(root, ("jpeg",), cancel_first=True)
-        elif case in {"pause", "close-audio", "minimize", "lock", "sleep"}:
+        elif case == "lock":
+            lock_case(root)
+        elif case in {"pause", "close-audio", "minimize", "sleep"}:
             audio_lifecycle_case(root, case)
         else:
             raise SystemExit(f"Unknown SHADOWMIND_INPUT_TEST: {case}")
