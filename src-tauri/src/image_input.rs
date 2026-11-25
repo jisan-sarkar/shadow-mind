@@ -1,3 +1,4 @@
+use crate::media_input::{BUS_TIMEOUT, PORTAL_TIMEOUT};
 use ashpd::desktop::{
     ResponseError,
     file_chooser::{FileFilter, SelectedFiles},
@@ -29,6 +30,7 @@ pub enum ImageInputError {
     Unreadable,
     TooLarge,
     ChooserUnavailable,
+    CleanupFailed,
 }
 
 pub async fn choose_and_inspect(
@@ -38,8 +40,8 @@ pub async fn choose_and_inspect(
     let connection = tokio::select! {
         biased;
         _ = &mut cancellation => return Ok(None),
-        connection = ashpd::zbus::Connection::session() => {
-            connection.map_err(|_| ImageInputError::ChooserUnavailable)?
+        connection = tokio::time::timeout(BUS_TIMEOUT, ashpd::zbus::Connection::session()) => {
+            connection.ok().and_then(Result::ok).ok_or(ImageInputError::ChooserUnavailable)?
         }
     };
     let request = SelectedFiles::open_file()
@@ -55,13 +57,20 @@ pub async fn choose_and_inspect(
         );
     let response = tokio::select! {
         biased;
-        _ = &mut cancellation => {
-            let _ = connection.close().await;
-            return Ok(None);
-        }
-        response = request.send() => response,
+        _ = &mut cancellation => None,
+        response = tokio::time::timeout(PORTAL_TIMEOUT, request.send()) => Some(response),
+    };
+    if !matches!(
+        tokio::time::timeout(BUS_TIMEOUT, connection.close()).await,
+        Ok(Ok(()))
+    ) {
+        return Err(ImageInputError::CleanupFailed);
+    }
+    let Some(response) = response else {
+        return Ok(None);
     };
     let selected = response
+        .map_err(|_| ImageInputError::ChooserUnavailable)?
         .map_err(|_| ImageInputError::ChooserUnavailable)?
         .response();
     let selection = match selected {
@@ -79,12 +88,11 @@ pub async fn choose_and_inspect(
     ) {
         return Ok(None);
     }
-    let work = tauri::async_runtime::spawn_blocking(move || inspect(&path));
-    tokio::select! {
-        biased;
-        _ = &mut cancellation => Ok(None),
-        result = work => result.map_err(|_| ImageInputError::Unreadable)?.map(Some),
-    }
+    // Keep the worker registered until the decoder exits, even after consent is revoked.
+    tauri::async_runtime::spawn_blocking(move || inspect(&path))
+        .await
+        .map_err(|_| ImageInputError::Unreadable)?
+        .map(Some)
 }
 
 fn local_image_path(uri: &str) -> Result<PathBuf, ImageInputError> {

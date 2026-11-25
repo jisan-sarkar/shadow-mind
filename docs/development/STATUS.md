@@ -1,4 +1,14 @@
-# Development handover and D00 evidence
+# Development handover
+
+| Field | Current record |
+|---|---|
+| Date and environment | 2026-11-26 (Asia/Dhaka), reference Ubuntu desktop and GNOME/Wayland |
+| Specification and task | v1.4. D03 WP01/WP02/WP06 cleanup and desktop acceptance. |
+| Workspace | `/home/js/Projects/shadow-mind`, branch `feature/d03-authorized-inputs` from D02 merge `1c5d840` |
+| Evidence | [D03 checks and test procedure](../test-plans/D03-EVIDENCE.md) |
+| Next task | Finish native acceptance and check the D03 PR before merging into `dev`. D04 follows the D03 exit. |
+
+## Historical preparation evidence
 
 | Field | Record |
 |---|---|

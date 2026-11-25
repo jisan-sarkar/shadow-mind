@@ -109,7 +109,9 @@ export type NativeStatus =
   | "receiving"
   | "unavailable"
   | "denied"
-  | "suspended";
+  | "suspended"
+  | "cleanupFailed"
+  | "controlsUnavailable";
 export type NativeKind = "screen" | "audio";
 export interface AudioChoice {
   id: string;

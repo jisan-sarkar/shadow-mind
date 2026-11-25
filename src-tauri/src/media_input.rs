@@ -1,17 +1,25 @@
+use crate::capture_indicator::CaptureIndicator;
 use ashpd::{
     desktop::{
-        PersistMode, ResponseError,
+        PersistMode, ResponseError, Session,
         screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
     },
     zbus::{Connection, Proxy},
 };
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
 use gstreamer::{self as gst, prelude::*};
 use gstreamer_app::AppSink;
 use serde::Serialize;
-use std::{os::fd::AsRawFd, time::Duration};
-use tokio::sync::oneshot;
+use std::{
+    os::fd::{AsRawFd, OwnedFd},
+    time::Duration,
+};
+use tokio::{sync::oneshot, time::timeout};
 use uuid::Uuid;
+
+pub const BUS_TIMEOUT: Duration = Duration::from_secs(5);
+pub const PORTAL_TIMEOUT: Duration = Duration::from_secs(120);
+const REVOCATION_GRACE: Duration = Duration::from_millis(350);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +32,8 @@ pub enum NativeStatus {
     Unavailable,
     Denied,
     Suspended,
+    CleanupFailed,
+    ControlsUnavailable,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -88,155 +98,296 @@ pub async fn receive(
     let (desktop, system) = match tokio::select! {
         biased;
         _ = &mut cancellation => return NativeStatus::Idle,
-        connections = setup => connections,
+        connections = timeout(BUS_TIMEOUT, setup) => connections,
     } {
-        Ok(connections) => connections,
-        Err(_) => return NativeStatus::Unavailable,
+        Ok(Ok(connections)) => connections,
+        _ => return NativeStatus::Unavailable,
     };
 
-    let run = receive_unlocked(source, &desktop, &system, available);
+    let mut capture = Capture::default();
+    let mut indicator = None;
     let result = tokio::select! {
         biased;
         _ = &mut cancellation => NativeStatus::Idle,
-        result = run => result,
+        result = receive_unlocked(
+            source, &desktop, &system, &mut capture, &mut indicator, available
+        ) => result,
     };
-    // Each live source uses a dedicated connection. Closing it withdraws any
-    // unfinished portal dialog and releases the corresponding screen grant.
-    let _ = desktop.close().await;
-    result
+    if capture.release(desktop, indicator).await {
+        result
+    } else {
+        NativeStatus::CleanupFailed
+    }
+}
+
+#[derive(Default)]
+struct Capture {
+    session: Option<Session<Screencast>>,
+    pipeline: Option<Pipeline>,
+    pipewire_remote: Option<OwnedFd>,
+}
+
+impl Capture {
+    async fn release(self, desktop: Connection, indicator: Option<CaptureIndicator>) -> bool {
+        let Self {
+            session,
+            pipeline,
+            pipewire_remote,
+        } = self;
+        let release_pipeline = async move {
+            let Some(pipeline) = pipeline else {
+                return true;
+            };
+            let stop = tauri::async_runtime::spawn_blocking(move || {
+                let _pipewire_remote = pipewire_remote;
+                pipeline.stop()
+            });
+            matches!(timeout(BUS_TIMEOUT, stop).await, Ok(Ok(true)))
+        };
+        let release_portal = async move {
+            let close_session = async {
+                let Some(session) = session else { return };
+                // Closed sessions may reject Close. Disconnecting the unique caller
+                // also releases its pending requests and session.
+                let _ = session.close().await;
+            };
+            let close_indicator = async {
+                if let Some(indicator) = indicator {
+                    indicator.close().await;
+                }
+            };
+            let _ = timeout(Duration::from_secs(1), async {
+                tokio::join!(close_session, close_indicator);
+            })
+            .await;
+            matches!(timeout(BUS_TIMEOUT, desktop.close()).await, Ok(Ok(())))
+        };
+        let (pipeline_released, portal_released) = tokio::join!(release_pipeline, release_portal);
+        pipeline_released && portal_released
+    }
 }
 
 async fn receive_unlocked(
     source: MediaSource,
     desktop: &Connection,
     system: &Connection,
+    resources: &mut Capture,
+    indicator: &mut Option<CaptureIndicator>,
     available: impl Fn(),
 ) -> NativeStatus {
-    let Ok(screen_saver) = Proxy::new(
-        desktop,
-        "org.gnome.ScreenSaver",
-        "/org/gnome/ScreenSaver",
-        "org.gnome.ScreenSaver",
-    )
-    .await
-    else {
+    let setup = lifecycle_streams(desktop, system);
+    let Ok(Ok((mut locks, mut sleeps, locked))) = timeout(BUS_TIMEOUT, setup).await else {
         return NativeStatus::Unavailable;
     };
-    let Ok(login) = Proxy::new(
-        system,
-        "org.freedesktop.login1",
-        "/org/freedesktop/login1",
-        "org.freedesktop.login1.Manager",
-    )
-    .await
-    else {
-        return NativeStatus::Unavailable;
-    };
-    let Ok(mut locks) = screen_saver.receive_signal("ActiveChanged").await else {
-        return NativeStatus::Unavailable;
-    };
-    let Ok(mut sleeps) = login.receive_signal("PrepareForSleep").await else {
-        return NativeStatus::Unavailable;
-    };
-    match screen_saver.call::<_, _, bool>("GetActive", &()).await {
-        Ok(false) => {}
-        Ok(true) => return NativeStatus::Suspended,
-        Err(_) => return NativeStatus::Unavailable,
+    if locked {
+        return NativeStatus::Suspended;
     }
-
+    let label = match &source {
+        MediaSource::Screen => "ShadowMind screen input",
+        MediaSource::Audio(_) => "ShadowMind audio input",
+    };
+    let Ok(Ok(control)) = timeout(BUS_TIMEOUT, CaptureIndicator::show(desktop, label)).await else {
+        return NativeStatus::ControlsUnavailable;
+    };
+    let control = indicator.insert(control);
     let capture = async {
         if gst::init().is_err() {
             return NativeStatus::Unavailable;
         }
         match source {
-            MediaSource::Screen => capture_screen(desktop, available).await,
-            MediaSource::Audio(target) => capture_audio(target, available).await,
+            MediaSource::Screen => capture_screen(desktop, resources, available).await,
+            MediaSource::Audio(target) => capture_audio(target, resources, available).await,
         }
     };
     tokio::select! {
         biased;
         _ = locks.next() => NativeStatus::Suspended,
         _ = sleeps.next() => NativeStatus::Suspended,
+        _ = control.stop_requested() => NativeStatus::Idle,
         result = capture => result,
     }
 }
 
-async fn capture_screen(desktop: &Connection, available: impl Fn()) -> NativeStatus {
-    let Ok(portal) = Screencast::with_connection(desktop.clone()).await else {
+async fn lifecycle_streams(
+    desktop: &Connection,
+    system: &Connection,
+) -> Result<
+    (
+        ashpd::zbus::proxy::SignalStream<'static>,
+        ashpd::zbus::proxy::SignalStream<'static>,
+        bool,
+    ),
+    ashpd::zbus::Error,
+> {
+    let screen_saver = Proxy::new(
+        desktop,
+        "org.gnome.ScreenSaver",
+        "/org/gnome/ScreenSaver",
+        "org.gnome.ScreenSaver",
+    )
+    .await?;
+    let login = Proxy::new(
+        system,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await?;
+    let locks = screen_saver.receive_signal("ActiveChanged").await?;
+    let sleeps = login.receive_signal("PrepareForSleep").await?;
+    let locked = screen_saver.call::<_, _, bool>("GetActive", &()).await?;
+    Ok((locks, sleeps, locked))
+}
+
+pub async fn watch_desktop(suspend: impl Fn(), resume: impl Fn()) {
+    loop {
+        let setup = async {
+            let desktop = Connection::session().await?;
+            let system = Connection::system().await?;
+            let streams = lifecycle_streams(&desktop, &system).await?;
+            Ok::<_, ashpd::zbus::Error>((desktop, system, streams))
+        };
+        if let Ok(Ok((_desktop, _system, (mut locks, mut sleeps, mut locked)))) =
+            timeout(BUS_TIMEOUT, setup).await
+        {
+            let mut sleeping = false;
+            if locked {
+                suspend()
+            } else {
+                resume()
+            }
+            loop {
+                let (from_lock, signal) = tokio::select! {
+                    message = locks.next() => (true, message),
+                    message = sleeps.next() => (false, message),
+                };
+                let Some(active) =
+                    signal.and_then(|message| message.body().deserialize::<bool>().ok())
+                else {
+                    break;
+                };
+                if from_lock {
+                    locked = active
+                } else {
+                    sleeping = active
+                }
+                if locked || sleeping {
+                    suspend()
+                } else {
+                    resume()
+                }
+            }
+        }
+        suspend();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+async fn capture_screen(
+    desktop: &Connection,
+    resources: &mut Capture,
+    available: impl Fn(),
+) -> NativeStatus {
+    let Ok(Ok(portal)) = timeout(BUS_TIMEOUT, Screencast::with_connection(desktop.clone())).await
+    else {
         return NativeStatus::Unavailable;
     };
-    let Ok(session) = portal.create_session(Default::default()).await else {
+    let Ok(Ok(session)) = timeout(BUS_TIMEOUT, portal.create_session(Default::default())).await
+    else {
         return NativeStatus::Unavailable;
     };
-    let result = async {
-        let Ok(mut revoked) = session.receive_closed().await else {
-            return NativeStatus::Unavailable;
+    let session = resources.session.insert(session);
+    let setup = async {
+        let Ok(revoked) = session.receive_closed().await else {
+            return Err(NativeStatus::Unavailable);
         };
         let request = portal
             .select_sources(
-                &session,
+                session,
                 SelectSourcesOptions::default()
-                    .set_sources(SourceType::WINDOW)
+                    .set_sources(SourceType::WINDOW | SourceType::MONITOR)
                     .set_cursor_mode(CursorMode::HIDDEN)
                     .set_multiple(false)
                     .set_persist_mode(PersistMode::DoNot),
             )
             .await;
         if request.and_then(|request| request.response()).is_err() {
-            return NativeStatus::Unavailable;
+            return Err(NativeStatus::Unavailable);
         }
         let chosen = portal
-            .start(&session, None, Default::default())
+            .start(session, None, Default::default())
             .await
             .and_then(|request| request.response());
         let selected = match chosen {
             Ok(selected) => selected,
-            Err(ashpd::Error::Response(ResponseError::Cancelled)) => return NativeStatus::Denied,
-            Err(_) => return NativeStatus::Unavailable,
+            Err(ashpd::Error::Response(ResponseError::Cancelled)) => {
+                return Err(NativeStatus::Denied);
+            }
+            Err(_) => return Err(NativeStatus::Unavailable),
         };
         let [stream] = selected.streams() else {
-            return NativeStatus::Unavailable;
+            return Err(NativeStatus::Unavailable);
         };
-        if stream.source_type() != Some(SourceType::WINDOW) || selected.restore_token().is_some() {
-            return NativeStatus::Unavailable;
+        if !matches!(
+            stream.source_type(),
+            Some(SourceType::WINDOW | SourceType::MONITOR)
+        ) || selected.restore_token().is_some()
+        {
+            return Err(NativeStatus::Unavailable);
         }
         let Ok(fd) = portal
-            .open_pipe_wire_remote(&session, Default::default())
+            .open_pipe_wire_remote(session, Default::default())
             .await
         else {
-            return NativeStatus::Unavailable;
+            return Err(NativeStatus::Unavailable);
         };
         let Some(source) = pipewire_source() else {
-            return NativeStatus::Unavailable;
+            return Err(NativeStatus::Unavailable);
         };
         source.set_property("fd", fd.as_raw_fd());
         source.set_property("path", stream.pipe_wire_node_id().to_string());
         let Some(pipeline) = Pipeline::screen(source) else {
-            return NativeStatus::Unavailable;
+            return Err(NativeStatus::Unavailable);
         };
-        tokio::select! {
-            biased;
-            closed = revoked.next() => {
-                if closed.is_some() { NativeStatus::Denied } else { NativeStatus::Unavailable }
-            }
-            result = pipeline.consume(available) => {
-                // The PipeWire error and the portal's Closed signal can arrive in either order.
-                if tokio::time::timeout(Duration::from_millis(350), revoked.next())
-                    .await.is_ok_and(|signal| signal.is_some())
-                {
-                    NativeStatus::Denied
-                } else {
-                    result
-                }
+        Ok((revoked, fd, pipeline))
+    };
+    let (revoked, fd, pipeline) = match timeout(PORTAL_TIMEOUT, setup).await {
+        Ok(Ok(resources)) => resources,
+        Ok(Err(status)) => return status,
+        Err(_) => return NativeStatus::Unavailable,
+    };
+    resources.pipewire_remote = Some(fd);
+    let pipeline = resources.pipeline.insert(pipeline);
+    screen_outcome(revoked, pipeline.consume(available)).await
+}
+
+async fn screen_outcome(
+    mut revoked: impl Stream + Unpin,
+    receive: impl Future<Output = NativeStatus>,
+) -> NativeStatus {
+    tokio::select! {
+        biased;
+        closed = revoked.next() => {
+            if closed.is_some() { NativeStatus::Denied } else { NativeStatus::Unavailable }
+        }
+        result = receive => {
+            // The PipeWire error and the portal's Closed signal can arrive in either order.
+            if timeout(REVOCATION_GRACE, revoked.next())
+                .await.is_ok_and(|signal| signal.is_some())
+            {
+                NativeStatus::Denied
+            } else {
+                result
             }
         }
     }
-    .await;
-    let _ = session.close().await;
-    result
 }
 
-async fn capture_audio(target: String, available: impl Fn()) -> NativeStatus {
+async fn capture_audio(
+    target: String,
+    resources: &mut Capture,
+    available: impl Fn(),
+) -> NativeStatus {
     let Some(source) = pipewire_source() else {
         return NativeStatus::Unavailable;
     };
@@ -244,7 +395,7 @@ async fn capture_audio(target: String, available: impl Fn()) -> NativeStatus {
     let Some(pipeline) = Pipeline::audio(source) else {
         return NativeStatus::Unavailable;
     };
-    pipeline.consume(available).await
+    resources.pipeline.insert(pipeline).consume(available).await
 }
 
 fn pipewire_source() -> Option<gst::Element> {
@@ -270,6 +421,13 @@ struct Pipeline {
 }
 
 impl Pipeline {
+    fn stop(self) -> bool {
+        self.gstreamer.set_state(gst::State::Null).is_ok()
+            && matches!(
+                self.gstreamer.state(gst::ClockTime::from_seconds(2)),
+                (Ok(_), gst::State::Null, _)
+            )
+    }
     fn screen(source: gst::Element) -> Option<Self> {
         let caps = gst::Caps::builder("video/x-raw")
             .field("format", "RGBA")
@@ -373,16 +531,29 @@ impl Pipeline {
     }
 }
 
-impl Drop for Pipeline {
-    fn drop(&mut self) {
-        let _ = self.gstreamer.set_state(gst::State::Null);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn screen_failure_requires_a_portal_signal_to_report_revocation() {
+        use futures_util::stream;
+        assert_eq!(
+            screen_outcome(stream::iter([()]), std::future::pending()).await,
+            NativeStatus::Denied,
+        );
+        let delayed_close =
+            stream::once(async { tokio::time::sleep(Duration::from_millis(20)).await });
+        assert_eq!(
+            screen_outcome(Box::pin(delayed_close), async { NativeStatus::Unavailable }).await,
+            NativeStatus::Denied,
+        );
+        assert_eq!(
+            screen_outcome(stream::pending::<()>(), async { NativeStatus::Unavailable }).await,
+            NativeStatus::Unavailable,
+        );
+    }
 
     #[test]
     fn synthetic_audio_has_a_bounded_sample_and_releases_pipeline() {
@@ -408,7 +579,7 @@ mod tests {
         });
         assert_eq!(outcome.unwrap(), NativeStatus::Unavailable);
         assert!(received.load(Ordering::Relaxed));
-        drop(pipeline);
+        assert!(pipeline.stop());
         assert_eq!(graph.current_state(), gst::State::Null);
     }
 

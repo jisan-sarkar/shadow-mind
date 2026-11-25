@@ -33,7 +33,7 @@ jobs:
       - name: Native prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config curl wget file libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev libxdo-dev libayatana-appindicator3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config curl wget file libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev libxdo-dev libayatana-appindicator3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire gstreamer1.0-plugins-base
       - name: Toolchains and locked install
         run: |
           npm install --global pnpm@12.18.0

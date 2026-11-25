@@ -68,6 +68,7 @@ pub enum SessionError {
     ImageConsentRequired,
     NativeConsentRequired,
     SourceUnavailable,
+    CleanupFailed,
 }
 
 #[derive(Deserialize)]
@@ -121,6 +122,9 @@ pub struct Session {
     screen: Option<PendingWork>,
     audio: Option<PendingWork>,
     audio_choices: Vec<AudioChoice>,
+    closing: bool,
+    desktop_suspended: bool,
+    image_cleanup_failed: bool,
 }
 
 impl Session {
@@ -129,11 +133,18 @@ impl Session {
     }
 
     pub fn apply(&mut self, action: SessionAction) -> Result<Option<SessionWork>, SessionError> {
+        if self.closing {
+            return Err(SessionError::InvalidTransition);
+        }
         match action {
+            SessionAction::Configure { .. }
+                if self.view.screen_status == NativeStatus::CleanupFailed
+                    || self.view.audio_status == NativeStatus::CleanupFailed =>
+            {
+                return Err(SessionError::CleanupFailed);
+            }
             SessionAction::Configure { mode }
-                if matches!(self.view.phase, Phase::Idle | Phase::Stopped)
-                    && self.screen.is_none()
-                    && self.audio.is_none() =>
+                if matches!(self.view.phase, Phase::Idle | Phase::Stopped) && !self.draining() =>
             {
                 self.view = SessionSnapshot {
                     id: Some(Uuid::new_v4()),
@@ -148,7 +159,7 @@ impl Session {
                 confirm_fixtures,
             } => {
                 self.require_session(session_id)?;
-                if self.view.phase != Phase::Configuring {
+                if self.view.phase != Phase::Configuring || self.desktop_suspended {
                     return Err(SessionError::InvalidTransition);
                 }
                 if !confirm_fixtures {
@@ -161,14 +172,11 @@ impl Session {
                 if !matches!(self.view.phase, Phase::Active | Phase::Paused) {
                     return Err(SessionError::InvalidTransition);
                 }
-                self.cancel_fixture();
-                self.cancel_image();
-                self.stop_native();
-                self.view.phase = Phase::Paused;
+                self.pause();
             }
             SessionAction::Resume { session_id } => {
                 self.require_session(session_id)?;
-                if self.view.phase != Phase::Paused {
+                if self.view.phase != Phase::Paused || self.desktop_suspended {
                     return Err(SessionError::InvalidTransition);
                 }
                 self.view.phase = Phase::Active;
@@ -215,7 +223,7 @@ impl Session {
                 | (InputKind::Screen, Some(InputMode::Screen))
                 | (InputKind::Audio, Some(InputMode::Audio))
         );
-        if self.view.phase == Phase::Active && allowed {
+        if self.view.phase == Phase::Active && allowed && !self.desktop_suspended && !self.closing {
             Ok(())
         } else {
             Err(SessionError::InvalidTransition)
@@ -242,6 +250,9 @@ impl Session {
         self.require_native(session_id, kind)?;
         if !confirmed {
             return Err(SessionError::NativeConsentRequired);
+        }
+        if *self.native_status(kind) == NativeStatus::CleanupFailed {
+            return Err(SessionError::CleanupFailed);
         }
         if self.native_slot(kind).is_some() {
             return Err(SessionError::InvalidTransition);
@@ -302,7 +313,7 @@ impl Session {
         if kind == InputKind::Audio {
             self.audio_choices.clear();
         }
-        *self.native_status(kind) = if shutting_down {
+        *self.native_status(kind) = if shutting_down && status != NativeStatus::CleanupFailed {
             NativeStatus::Idle
         } else {
             status
@@ -325,6 +336,8 @@ impl Session {
                     let _ = sender.send(());
                 }
                 NativeStatus::Disconnecting
+            } else if *self.native_status(kind) == NativeStatus::CleanupFailed {
+                NativeStatus::CleanupFailed
             } else {
                 NativeStatus::Idle
             };
@@ -357,6 +370,8 @@ impl Session {
     ) -> Result<SessionWork, SessionError> {
         self.require_session(session_id)?;
         if self.view.phase != Phase::Active
+            || self.desktop_suspended
+            || self.closing
             || !matches!(self.view.mode, Some(InputMode::Screen | InputMode::Both))
             || self.pending_image.is_some()
         {
@@ -364,6 +379,9 @@ impl Session {
         }
         if !authorized {
             return Err(SessionError::ImageConsentRequired);
+        }
+        if self.image_cleanup_failed {
+            return Err(SessionError::CleanupFailed);
         }
         let request_id = Uuid::new_v4();
         let (sender, cancellation) = oneshot::channel();
@@ -378,9 +396,13 @@ impl Session {
         })
     }
 
-    pub fn finish_image(&mut self, session_id: Uuid, request_id: Uuid) -> bool {
+    pub fn finish_image(
+        &mut self,
+        session_id: Uuid,
+        request_id: Uuid,
+        cleanup_failed: bool,
+    ) -> bool {
         if self.view.id != Some(session_id)
-            || self.view.phase != Phase::Active
             || self
                 .pending_image
                 .as_ref()
@@ -388,12 +410,18 @@ impl Session {
         {
             return false;
         }
-        self.pending_image = None;
-        true
+        self.image_cleanup_failed |= cleanup_failed;
+        let completed = self.pending_image.take();
+        self.view.phase == Phase::Active
+            && completed.is_some_and(|work| work.cancellation.is_some())
     }
 
     fn cancel_image(&mut self) {
-        if let Some(sender) = self.pending_image.take().and_then(|work| work.cancellation) {
+        if let Some(sender) = self
+            .pending_image
+            .as_mut()
+            .and_then(|work| work.cancellation.take())
+        {
             let _ = sender.send(());
         }
     }
@@ -404,6 +432,35 @@ impl Session {
         } else {
             Err(SessionError::StaleSession)
         }
+    }
+
+    pub fn pause(&mut self) -> bool {
+        if self.view.phase != Phase::Active {
+            return false;
+        }
+        self.cancel_fixture();
+        self.cancel_image();
+        self.stop_native();
+        self.view.phase = Phase::Paused;
+        true
+    }
+
+    pub fn set_desktop_suspended(&mut self, suspended: bool) -> bool {
+        self.desktop_suspended = suspended;
+        suspended && self.pause()
+    }
+
+    pub fn begin_close(&mut self) -> bool {
+        if self.closing {
+            return false;
+        }
+        self.closing = true;
+        self.stop();
+        true
+    }
+
+    pub fn draining(&self) -> bool {
+        self.screen.is_some() || self.audio.is_some() || self.pending_image.is_some()
     }
 
     pub fn stop(&mut self) {
@@ -616,8 +673,22 @@ mod tests {
             .apply(SessionAction::Pause { session_id: id })
             .unwrap();
         assert_eq!(work.cancellation.try_recv(), Ok(()));
-        assert!(!session.finish_image(id, work.request_id));
+        session
+            .apply(SessionAction::Resume { session_id: id })
+            .unwrap();
+        assert!(session.begin_image(id, true).is_err());
+        assert!(!session.finish_image(id, work.request_id, false));
+        let mut restarted = session.begin_image(id, true).unwrap();
         session.stop();
+        assert_eq!(restarted.cancellation.try_recv(), Ok(()));
+        assert!(
+            session
+                .apply(SessionAction::Configure {
+                    mode: InputMode::Audio
+                })
+                .is_err()
+        );
+        assert!(!session.finish_image(id, restarted.request_id, false));
         session
             .apply(SessionAction::Configure {
                 mode: InputMode::Audio,
@@ -628,6 +699,57 @@ mod tests {
         assert_eq!(
             session.begin_image(audio_id, true).err(),
             Some(SessionError::InvalidTransition)
+        );
+    }
+
+    #[test]
+    fn desktop_suspension_cancels_all_work_and_cleanup_failure_blocks_reuse() {
+        let mut session = Session::default();
+        let id = configure(&mut session);
+        start(&mut session, id);
+        let mut image = session.begin_image(id, true).unwrap();
+        let (mut screen, _) = session
+            .begin_native(id, InputKind::Screen, true, None)
+            .unwrap();
+        assert!(session.set_desktop_suspended(true));
+        assert_eq!(image.cancellation.try_recv(), Ok(()));
+        assert_eq!(screen.cancellation.try_recv(), Ok(()));
+        assert!(
+            session
+                .apply(SessionAction::Resume { session_id: id })
+                .is_err()
+        );
+        assert!(!session.set_desktop_suspended(false));
+        assert_eq!(session.snapshot().phase, Phase::Paused);
+        assert!(!session.finish_image(id, image.request_id, false));
+        assert!(session.update_native(
+            id,
+            screen.request_id,
+            InputKind::Screen,
+            NativeStatus::CleanupFailed
+        ));
+        assert!(
+            session
+                .apply(SessionAction::Resume { session_id: id })
+                .is_ok()
+        );
+        assert!(
+            session
+                .begin_native(id, InputKind::Screen, true, None)
+                .is_err()
+        );
+        assert!(session.begin_close());
+        assert!(!session.begin_close());
+        assert_eq!(
+            session.snapshot().screen_status,
+            NativeStatus::CleanupFailed
+        );
+        assert!(
+            session
+                .apply(SessionAction::Configure {
+                    mode: InputMode::Both
+                })
+                .is_err()
         );
     }
 

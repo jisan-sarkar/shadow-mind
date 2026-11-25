@@ -16,12 +16,17 @@ export const inputLabels: Record<NativeStatus, string> = {
   unavailable: "Unavailable",
   denied: "Permission ended",
   suspended: "Suspended",
+  cleanupFailed: "Release failed. Reopen ShadowMind.",
+  controlsUnavailable: "Desktop stop controls unavailable",
 };
 
 export const inputRunning = (status: NativeStatus) =>
   status === "connecting" ||
   status === "receiving" ||
   status === "disconnecting";
+
+const inputBlocked = (status: NativeStatus) =>
+  inputRunning(status) || status === "cleanupFailed";
 
 export default function NativeSources({
   session,
@@ -68,9 +73,9 @@ export default function NativeSources({
       </p>
       <div className="settings-grid native-grid">
         {session.mode !== "audio" && (
-          <div>
+          <section aria-label="Screen input">
             <div className="section-heading">
-              <h3>Screen window</h3>
+              <h3>Window or display</h3>
               <span className="badge" role="status">
                 {inputLabels[session.screenStatus]}
               </span>
@@ -79,31 +84,31 @@ export default function NativeSources({
               <input
                 type="checkbox"
                 checked={screenConsent}
-                disabled={inputRunning(session.screenStatus)}
+                disabled={inputBlocked(session.screenStatus)}
                 onChange={(event) =>
                   setScreenConsent(event.currentTarget.checked)
                 }
               />
-              I have permission to share the window I select.
+              I have permission to share the window or display I select.
             </label>
             <div className="actions">
               <button
                 className="secondary"
                 disabled={
-                  !screenConsent || busy || inputRunning(session.screenStatus)
+                  !screenConsent || busy || inputBlocked(session.screenStatus)
                 }
                 onClick={() => {
                   void start("screen", screenConsent);
                   setScreenConsent(false);
                 }}
               >
-                Choose window
+                Choose window or display
               </button>
             </div>
-          </div>
+          </section>
         )}
         {session.mode !== "screen" && (
-          <div>
+          <section aria-label="Audio input">
             <div className="section-heading">
               <h3>Audio source</h3>
               <span className="badge" role="status">
@@ -113,7 +118,7 @@ export default function NativeSources({
             <div className="settings-form">
               <button
                 className="secondary"
-                disabled={loading || busy || inputRunning(session.audioStatus)}
+                disabled={loading || busy || inputBlocked(session.audioStatus)}
                 onClick={() => void refresh()}
               >
                 {loading ? "Finding sources…" : "Find audio sources"}
@@ -144,7 +149,7 @@ export default function NativeSources({
               <input
                 type="checkbox"
                 checked={audioConsent}
-                disabled={inputRunning(session.audioStatus)}
+                disabled={inputBlocked(session.audioStatus)}
                 onChange={(event) =>
                   setAudioConsent(event.currentTarget.checked)
                 }
@@ -160,7 +165,7 @@ export default function NativeSources({
                   !selected ||
                   loading ||
                   busy ||
-                  inputRunning(session.audioStatus)
+                  inputBlocked(session.audioStatus)
                 }
                 onClick={() => {
                   void start("audio", audioConsent, selected);
@@ -177,7 +182,7 @@ export default function NativeSources({
                 {error}
               </p>
             )}
-          </div>
+          </section>
         )}
       </div>
     </section>

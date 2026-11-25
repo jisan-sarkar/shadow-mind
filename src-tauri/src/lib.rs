@@ -1,3 +1,4 @@
+mod capture_indicator;
 mod image_input;
 mod media_input;
 mod session;
@@ -102,6 +103,11 @@ impl From<SessionError> for PublicError {
                 ErrorCategory::Unavailable,
                 "The source is unavailable. Refresh the source list or choose an approved source again.",
             ),
+            SessionError::CleanupFailed => (
+                "source_release_failed",
+                ErrorCategory::Unavailable,
+                "Close and reopen ShadowMind before using this input again.",
+            ),
         };
         Self {
             code,
@@ -135,6 +141,11 @@ impl From<ImageInputError> for PublicError {
                 "image_chooser_unavailable",
                 ErrorCategory::Unavailable,
                 "The desktop file chooser is unavailable. Try again.",
+            ),
+            ImageInputError::CleanupFailed => (
+                "image_chooser_release_failed",
+                ErrorCategory::Unavailable,
+                "Close and reopen ShadowMind before opening the file chooser again.",
             ),
         };
         Self {
@@ -269,7 +280,11 @@ async fn choose_image(
         .lock()
         .map_err(|_| PublicError::app_unavailable())?
         .session
-        .finish_image(session_id, request_id);
+        .finish_image(
+            session_id,
+            request_id,
+            matches!(result, Err(ImageInputError::CleanupFailed)),
+        );
     if still_current {
         result.map_err(Into::into)
     } else {
@@ -377,6 +392,19 @@ fn emit_session_snapshot(app: &AppHandle, snapshot: Snapshot) {
     let _ = app.emit_to("main", SNAPSHOT_EVENT, event);
 }
 
+fn update_lifecycle(app: &AppHandle, change: impl FnOnce(&mut Session) -> bool) {
+    let state = app.state::<Mutex<Foundation>>();
+    let Ok(mut foundation) = state.lock() else {
+        return;
+    };
+    if change(&mut foundation.session) {
+        foundation.revision += 1;
+        let snapshot = foundation.snapshot();
+        drop(foundation);
+        emit_session_snapshot(app, snapshot);
+    }
+}
+
 async fn complete_fixture(app: AppHandle, work: SessionWork) {
     let SessionWork {
         session_id,
@@ -406,9 +434,17 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let directory = app.path().app_config_dir()?;
-            app.manage(Mutex::new(Foundation::open(SettingsRepository::new(
-                directory,
-            ))));
+            let mut foundation = Foundation::open(SettingsRepository::new(directory));
+            foundation.session.set_desktop_suspended(true);
+            app.manage(Mutex::new(foundation));
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                media_input::watch_desktop(
+                    || update_lifecycle(&handle, |session| session.set_desktop_suspended(true)),
+                    || update_lifecycle(&handle, |session| session.set_desktop_suspended(false)),
+                )
+                .await;
+            });
             let window = app
                 .get_webview_window("main")
                 .ok_or("missing main window")?;
@@ -420,26 +456,33 @@ pub fn run() {
                         .new_window_state()
                         .contains(gtk::gdk::WindowState::ICONIFIED)
                     {
-                        let state = handle.state::<Mutex<Foundation>>();
-                        if let Ok(mut foundation) = state.lock()
-                            && foundation.session.stop_native()
-                        {
-                            foundation.revision += 1;
-                            let snapshot = foundation.snapshot();
-                            drop(foundation);
-                            emit_session_snapshot(&handle, snapshot);
-                        }
+                        update_lifecycle(&handle, Session::pause);
                     }
                     gtk::glib::Propagation::Proceed
                 });
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { .. } = event
-                && let Some(state) = window.try_state::<Mutex<Foundation>>()
-                && let Ok(mut state) = state.lock()
-            {
-                state.session.stop();
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let mut begin_close = false;
+                update_lifecycle(window.app_handle(), |session| {
+                    begin_close = session.begin_close();
+                    begin_close
+                });
+                api.prevent_close();
+                if begin_close {
+                    let window = window.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let drain = async {
+                            let state = window.state::<Mutex<Foundation>>();
+                            while state.lock().is_ok_and(|state| state.session.draining()) {
+                                tokio::time::sleep(Duration::from_millis(25)).await;
+                            }
+                        };
+                        let _ = tokio::time::timeout(Duration::from_secs(7), drain).await;
+                        let _ = window.destroy();
+                    });
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

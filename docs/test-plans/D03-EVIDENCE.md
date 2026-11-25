@@ -12,4 +12,51 @@ Reference environment is Ubuntu 26.04.1 on GNOME/Wayland, WebKitGTK 2.52.6, GStr
 | Packaging | The locked amd64 debug Debian bundle built, extracted and launched. Runtime libraries resolved from the system. The native D02 workspace regression smoke passed on the D03 build. |
 | Dependencies | RustSec reported the existing GTK stack advisory and two maintenance warnings. No new advisories were reported by that scan. Production release gates and provider validation remain pending. |
 
-D03 is locally implemented with partial native verification. Preserve the remaining acceptance items and evidence before declaring exit. Use a fabricated window and audio fixture, or explicitly authorized sources. D03 sends no input to an AI provider.
+## D03 cleanup revision
+
+The 2026-11-26 check used the reference GNOME/Wayland desktop, Node 24.22.3 and the matching scratch GStreamer development SDK. The debug amd64 package SHA-256 was `8c43516d2523fa928ae9c97a3d97bc97ae84316660baca4c2d450b6d00df6838`. It was extracted into a temporary directory and launched with a disposable profile.
+
+| Check | Actual outcome |
+|---|---|
+| Frontend lint, formatting, type-check and tests | Passed, 5 tests. |
+| Rust formatting, locked Clippy and tests | Passed, 14 tests. Regression coverage includes late image completion, release-failure restart blocking, lock-state changes and both portal revocation event orders. |
+| Locked debug Debian bundle | Built and extracted successfully. |
+| D02 packaged desktop regression | Passed focus, onboarding, three modes, explicit confirmation, synthetic result, pause/resume/stop, window close, clean restart and settings recovery. |
+| D03 pending screen request | Passed. App stop withdrew the portal request and returned status to Off. |
+| D03 audio-only | Passed. The private PipeWire graph delivered the authorized generated tone, reported source loss and had no remaining active link. |
+| D03 combined | The desktop received the synthetic window and audio. Screen receipt continued after audio loss. The GNOME revocation assertion timed out. A repeat with separate screen and audio status checks is needed. |
+| D03 native PNG and JPEG selection | The PNG result reached the expected validated dimensions. The JPEG step timed out. |
+| D03 minimize | Before the desktop notification change, the GNOME/Wayland minimize test left the synthetic audio link active. The new notification Stop input action requires verification in the minimized state. |
+| Frontend dependency audit | No known vulnerabilities reported by `pnpm audit`. |
+| RustSec audit | Exit 0 on 479 crates. Three inherited warnings are `RUSTSEC-2024-0429`, `RUSTSEC-2026-0543` and `RUSTSEC-2024-0370`. The advisory database loaded. The crates.io index refresh reported a local configuration warning. |
+
+## Repeatable desktop acceptance
+
+Build the debug bundle with the locked dependencies, extract it without installing it, and pass the extracted binary to the smoke scripts from the repository root.
+
+```sh
+pnpm exec tauri build --debug --bundles deb -- --locked
+stage=$(mktemp -d)
+dpkg-deb -x src-tauri/target/debug/bundle/deb/ShadowMind_0.1.0_amd64.deb "$stage"
+python3 scripts/native-smoke.py "$stage/usr/bin/shadow-mind"
+SHADOWMIND_INPUT_TEST=cancel python3 scripts/native-input-smoke.py "$stage/usr/bin/shadow-mind"
+SHADOWMIND_INPUT_TEST=audio python3 scripts/native-input-smoke.py "$stage/usr/bin/shadow-mind"
+```
+
+The tests use GNOME/Wayland and Python GObject bindings for AT-SPI, GTK and GdkPixbuf. The audio cases also use PipeWire, WirePlumber and the GStreamer PipeWire plug-in. The runner creates the synthetic window, tone, PNG and JPEG and uses disposable profiles. Run each remaining case by substituting its value for `SHADOWMIND_INPUT_TEST`.
+
+| Case | Desktop action and expected result |
+|---|---|
+| `denial` | Cancel the GNOME share dialog. The app reports Permission ended. |
+| `screen` | Select only ShadowMind D03 Synthetic Window. The app receives samples and app-driven stop returns the source to Off. |
+| `close` | Select the synthetic window. The app closes during capture and exits successfully. Confirm GNOME's sharing indicator clears. |
+| `both` | Select the synthetic window. The runner disconnects the tone and checks that screen stays active. Stop sharing via GNOME and check that the app reports Permission ended for the screen. |
+| `revoke-first` | Select the synthetic window, then stop sharing via GNOME when prompted. The runner verifies audio stays active before disconnecting it. |
+| `image`, `image-png`, `image-jpeg` | Choose both generated images in turn or a single format. Check the metadata result. |
+| `pause`, `close-audio` | The runner pauses or closes the app with the synthetic audio link active and checks that the link is released. |
+| `minimize` | Open GNOME notifications from the top-bar clock and choose Stop input on ShadowMind audio input. Restore the app when prompted. The runner checks graph cleanup and Off status. |
+| `lock`, `sleep` | Return after locking or sleeping as prompted. The runner checks audio teardown and verifies that explicit resume leaves the source Off. |
+
+On the reference desktop, repeat lock/unlock and suspend/resume with the image chooser open. Check that pending requests are withdrawn, late results are discarded, and reopening the chooser requires a fresh confirmation. Verify screen cleanup through the GNOME sharing indicator and audio cleanup through the private PipeWire graph. Test a full display only on a controlled desktop showing synthetic content. Record the supported microphone and authorized application-audio choices, including any capabilities the host does not expose.
+
+D03 remains open pending native acceptance. Input stays local to the app.
