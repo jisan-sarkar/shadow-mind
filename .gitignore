@@ -1,0 +1,33 @@
+# Local dependencies and generated build output
+node_modules/
+dist/
+dist-ssr/
+coverage/
+target/
+*.tsbuildinfo
+.pnpm-store/
+.vite/
+src-tauri/gen/schemas/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+local-data/
+local-evidence/
+captures/
+recordings/
+# Keep dependency lockfiles tracked.
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
