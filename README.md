@@ -6,11 +6,30 @@ ShadowMind is a planned Ubuntu-first desktop AI copilot. It will interpret permi
 
 ## Status
 
-Planning baseline v1.4; repository initialization underway. No application, model integration or runtime capabilities have been implemented or verified.
+Specification baseline v1.4. The D02 foundation provides an Ubuntu desktop workspace, local appearance settings, and a synthetic demo session. Native inputs and provider integration follow later milestones. No public software release is available.
 
 ## Stack
 
-Tauri v2, Rust/Tokio, React, TypeScript, Vite and pnpm. Modular monolith; local-first data handling; optional approved AI provider. Exact versions are selected after feasibility checks.
+Tauri v2, Rust/Tokio, React, TypeScript, Vite and pnpm. Modular monolith; local-first data handling; optional approved AI provider. The toolchain files and lockfiles pin the tested foundation versions.checks.
+
+## Run the foundation
+
+Follow [PROJECT_SETUP.md](PROJECT_SETUP.md) for the Ubuntu prerequisites. Use Node and Rust from the checked-in toolchain files and pnpm from `package.json`.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm tauri dev
+```
+
+Complete first-launch setup, choose a mode, and confirm the bundled inputs before starting a demo. **Run fixture** displays the mock response. Preferences are saved locally. The session and its answer stay in memory.
+
+| Command | Purpose |
+|---|---|
+| `pnpm lint`, `pnpm typecheck`, `pnpm test` | Frontend quality checks |
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked` | Rust session and settings tests |
+| `pnpm tauri build --bundles deb -- --locked` | Build the local Ubuntu package |
+
+The [D02 foundation contract](docs/architecture/D02-FOUNDATION.md) documents how Rust owns session state and preferences.
 
 ## Start here
 

@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Local ShadowMind window and the foundation command surface",
+  "windows": ["main"],
+  "permissions": [
+    "allow-snapshot",
+    "allow-update-preferences",
+    "allow-session-action",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}
